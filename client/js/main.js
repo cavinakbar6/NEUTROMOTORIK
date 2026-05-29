@@ -207,7 +207,29 @@ function handleReport(report) {
 }
 
 function displayReport(report, isAggregated) {
-    speakInstruction("Penilaian selesai. Silakan periksa laporan klinis Anda di layar.");
+    const rl = report.risk_levels || {};
+    
+    // Construct doctor-like speech
+    let docSpeech = "Penilaian klinis selesai. Berdasarkan hasil skrining, ";
+    let findings = [];
+    
+    if (rl.stroke === "referal") findings.push("terdapat asimetri postur yang signifikan, mengindikasikan risiko tinggi gangguan motorik sebelah tubuh");
+    else if (rl.stroke === "monitor") findings.push("terdapat asimetri ringan yang perlu diobservasi berkala");
+    
+    if (rl.parkinson === "referal") findings.push("terdeteksi pola tremor yang berisiko Parkinson");
+    else if (rl.parkinson === "monitor") findings.push("terdeteksi indikasi tremor ringan yang perlu diwaspadai");
+    
+    if (rl.sarcopenia === "referal") findings.push("kecepatan gerak Anda terdeteksi lambat, mengindikasikan risiko kelemahan otot atau Sarcopenia");
+    else if (rl.sarcopenia === "monitor") findings.push("kecepatan gerak Anda berada di ambang batas peringatan, mohon jaga kekuatan otot Anda");
+
+    if (findings.length === 0) {
+        docSpeech += "secara keseluruhan kondisi gerak motorik Anda normal dan stabil. Pertahankan gaya hidup sehat Anda.";
+    } else {
+        docSpeech += findings.join(", dan ") + ". Kami merekomendasikan Anda untuk berkonsultasi lebih lanjut dengan dokter spesialis untuk evaluasi yang lebih akurat.";
+    }
+
+    speakInstruction(docSpeech, true);
+
     const el = document.getElementById("report-content");
     const empty = document.getElementById("report-empty");
     if (!el || !empty) return;
