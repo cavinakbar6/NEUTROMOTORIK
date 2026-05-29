@@ -236,7 +236,6 @@ function displayReport(report, isAggregated) {
     empty.style.display = "none";
     el.style.display = "flex";
 
-    const rl = report.risk_levels || {};
     const riskLabel = (r) => r === "referal" ? "REFERAL" : r === "monitor" ? "MONITOR" : "NORMAL";
     const riskClass = (r) => r === "referal" ? "referal" : r === "monitor" ? "monitor" : "normal";
 
