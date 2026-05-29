@@ -36,7 +36,7 @@ L_ANKLE,    R_ANKLE    = 27, 28
 class KinematicEngine:
     """Engine komputasi kinematika per-sesi assessment."""
 
-    def __init__(self, instruction: str, fps: int = 30, patient_age: int = None):
+    def __init__(self, instruction: str, fps: int = 30, patient_age: int | None = None):
         self.instruction = instruction
         self.fps = fps
         self.patient_age = patient_age
@@ -48,7 +48,7 @@ class KinematicEngine:
         self.tremor_analyzer = TremorAnalyzer(fps=fps)
         self.sts_detector = SitToStandDetector(fps=fps)
 
-        # Time-series buffers (maksimal 5000 frame = ~167 detik @ 30 FPS)
+        # Time-series buffers (max 5000 frame = ~167 detik)
         self._max_buffer = 5000
         self.angle_L_buf: List[float] = []
         self.angle_R_buf: List[float] = []
@@ -57,11 +57,29 @@ class KinematicEngine:
         self.wrist_y_R:   List[float] = []
         self.timestamps:  List[float] = []
 
+        # Compute age-stratified STS threshold
+        self._sts_warn = self._get_sts_threshold()
+        
+        # Initialize tracking variables
+        self._init_tracking_vars()
+
+    def _get_sts_threshold(self) -> float:
+        """Get age-stratified STS warning threshold (detik)."""
+        if self.patient_age is None:
+            return STS_WARN_YOUNG
+        if self.patient_age >= 75:
+            return STS_WARN_VERY_OLD
+        if self.patient_age >= 65:
+            return STS_WARN_ELDERLY
+        return STS_WARN_YOUNG
+
+    def _init_tracking_vars(self):
+        """Init all tracking variables separately to fix indentation issues."""
         # Per-frame paired angles for accurate ASI
         self._paired_angles: List[Tuple[float, float]] = []
 
         # PSD cache — update setiap N frame
-        self._psd_interval = max(30, fps * 2)  # Setiap 2 detik
+        self._psd_interval = max(30, self.fps * 2)  # Setiap 2 detik
         self._last_psd_frame = 0
         self._cached_psd_freqs: Optional[List[float]] = None
         self._cached_psd_power: Optional[List[float]] = None
