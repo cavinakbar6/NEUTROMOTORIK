@@ -76,9 +76,11 @@ function speakInstruction(text, priority = false) {
         app.currentAudio.currentTime = 0;
     }
     
-    // Menggunakan Google Translate TTS API (Garansi 100% Suara Indonesia Asli)
-    // Ini mem-bypass kelemahan browser/Windows yang tidak punya paket bahasa Indonesia
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=id&q=${encodeURIComponent(text)}`;
+    // Proxy request ke backend agar tidak diblokir OpaqueResponseBlocking (ORB) oleh browser
+    const backendPort = window.location.port === "5173" || window.location.port === "5500" ? 8765 : (window.location.port || 8765);
+    const host = window.location.hostname || "127.0.0.1";
+    const url = `http://${host}:${backendPort}/api/tts?text=${encodeURIComponent(text)}`;
+    
     app.currentAudio = new Audio(url);
     app.currentAudio.play().catch(e => console.warn("[TTS] Gagal memutar suara:", e));
 }
