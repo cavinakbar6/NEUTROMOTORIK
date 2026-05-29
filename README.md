@@ -115,4 +115,3 @@ NEUTROMOTORIK/
 ---
 
 ## 👨‍💻 Kontributor
-Dibuat untuk **LOMBA OLIBI** - Pengembangan Sistem Skrining NeuroMotorik.
