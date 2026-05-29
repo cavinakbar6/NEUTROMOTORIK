@@ -64,6 +64,25 @@ function initAlertSystem() {
     }
 }
 
+// ═══ Voice Instruction ══════════════════════════════════════
+app.lastVoiceAlert = 0;
+app.currentAudio = null;
+
+function speakInstruction(text, priority = false) {
+    if (!priority && app.currentAudio && !app.currentAudio.paused) return; // Jangan tumpuk jika sedang bicara
+    
+    if (app.currentAudio) {
+        app.currentAudio.pause();
+        app.currentAudio.currentTime = 0;
+    }
+    
+    // Menggunakan Google Translate TTS API (Garansi 100% Suara Indonesia Asli)
+    // Ini mem-bypass kelemahan browser/Windows yang tidak punya paket bahasa Indonesia
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=id&q=${encodeURIComponent(text)}`;
+    app.currentAudio = new Audio(url);
+    app.currentAudio.play().catch(e => console.warn("[TTS] Gagal memutar suara:", e));
+}
+
 function playBeep(freq = 880, dur = 0.15) {
     if (!app.alertAudio) return;
     try {
@@ -132,18 +151,16 @@ async function startSeqStep(pid) {
     if (app.seqStep >= app.seqTotal) { finishSequential(); return; }
     const stepData = app.SEQUENCE[app.seqStep];
     updateSeqStep(app.seqStep);
-    // Update guide text
+    // Update guide text and speak
     const gt = document.getElementById("guide-text");
     if (gt) gt.textContent = stepData.desc;
+    speakInstruction("Tahap selanjutnya. " + stepData.desc);
+    
     // Start session for this step
     const age = document.getElementById("patient-age")?.value || null;
     app.ws.startSession(pid, stepData.instruction, age);
     // Init MediaPipe + charts
     await startSingleAssessment(stepData);
-    // Auto-stop after duration
-    setTimeout(() => {
-        if (app.isRecording) app.stopAssessment();
-    }, stepData.duration * 1000);
 }
 
 function updateSeqStep(step) {
@@ -159,6 +176,7 @@ function updateSeqStep(step) {
 
 function finishSequential() {
     app.isSequential = false;
+    app.stopAssessment(); // Matikan kamera setelah semua tahap selesai
     const si = document.getElementById("seq-indicator");
     if (si) si.style.display = "none";
     const pg = document.getElementById("pose-guide");
@@ -187,6 +205,7 @@ function handleReport(report) {
 }
 
 function displayReport(report, isAggregated) {
+    speakInstruction("Penilaian selesai. Silakan periksa laporan klinis Anda di layar.");
     const el = document.getElementById("report-content");
     const empty = document.getElementById("report-empty");
     if (!el || !empty) return;
@@ -277,6 +296,8 @@ app.startAssessment = async function() {
     // Start session
     const age = document.getElementById("patient-age")?.value || null;
     app.ws.startSession(pid, inst, age);
+    
+    speakInstruction("Silakan mulai " + (labels[inst] || inst));
     await startSingleAssessment({ instruction: inst, duration: 60 });
 };
 
@@ -304,12 +325,26 @@ function updateTimer(maxMs) {
     const bar = document.getElementById("progress-bar"), label = document.getElementById("progress-text");
     if (bar) bar.style.width = pct + "%";
     if (label) label.textContent = Math.round(pct) + "%";
-    if (pct >= 100) { app.stopAssessment(); return; }
+    if (pct >= 100) { 
+        app.isRecording = false; // Stop recording to pause engine updates
+        if (app.isSequential) {
+            // For sequential, just end the session on backend to get the report
+            if (app.sessionId) app.ws.endSession(app.sessionId);
+        } else {
+            app.stopAssessment(); 
+        }
+        return; 
+    }
     requestAnimationFrame(() => updateTimer(maxMs));
 }
 
 // ═══ MediaPipe ═════════════════════════════════════════════
 async function initMediaPipe(instruction) {
+    // Jika kamera sudah berjalan, jangan re-init (mencegah kamera mati saat transisi 3-in-1)
+    if (app.camera && app.pose) {
+        return;
+    }
+    
     const ve = document.getElementById("webcam"), ce = document.getElementById("skeleton-canvas");
     app.skeleton = new SkeletonRenderer(ve, ce);
     if (app.pose) { try { app.pose.close(); } catch (e) {} app.pose = null; }
@@ -318,12 +353,32 @@ async function initMediaPipe(instruction) {
     pose.onResults((r) => {
         if (!app.isRecording) return;
         app.fpsCounter++;
-        if (r.poseLandmarks) {
-            const lms = r.poseLandmarks.map((lm, i) => ({ id: i, x: lm.x, y: lm.y, z: lm.z, vis: lm.visibility !== undefined ? lm.visibility : 1.0 }));
-            app.skeleton.draw(lms, app._localAngles);
-            app.frameCount++;
-            app.ws.sendLandmarks(app.frameCount, performance.now() / 1000, lms);
+        
+        if (!r.poseLandmarks || r.poseLandmarks.length === 0) {
+            // Tangan atau badan tidak terdeteksi sama sekali!
+            const now = performance.now();
+            if (now - app.lastVoiceAlert > 10000) { // 10 detik cooldown
+                speakInstruction("Mohon posisikan badan Anda agar terlihat jelas di depan kamera", true);
+                app.lastVoiceAlert = now;
+            }
+            return;
         }
+
+        const lms = r.poseLandmarks.map((lm, i) => ({ id: i, x: lm.x, y: lm.y, z: lm.z, vis: lm.visibility !== undefined ? lm.visibility : 1.0 }));
+        
+        // Peringatan jika tangan (pergelangan) tidak terlihat (visibilitas sangat rendah)
+        const leftWrist = lms[15], rightWrist = lms[16];
+        if (leftWrist && rightWrist && (leftWrist.vis < 0.2 || rightWrist.vis < 0.2)) {
+            const now = performance.now();
+            if (now - app.lastVoiceAlert > 8000) {
+                speakInstruction("Tangan Anda tidak terlihat di kamera. Mundur sedikit atau sesuaikan kamera.", true);
+                app.lastVoiceAlert = now;
+            }
+        }
+        
+        app.skeleton.draw(lms, app._localAngles);
+        app.frameCount++;
+        app.ws.sendLandmarks(app.frameCount, performance.now() / 1000, lms);
     });
     await pose.initialize();
     app.pose = pose;
@@ -349,6 +404,30 @@ function handleMetrics(m) {
         if (ce) ce.textContent = Math.round(m.confidence * 100) + "%";
         if (cb) cb.style.width = Math.round(m.confidence * 100) + "%";
     }
+
+    // Voice Alert Handling
+    if (m.alert) {
+        const now = performance.now();
+        if (now - app.lastVoiceAlert > 6000) { // 6 detik cooldown
+            if (m.alert === "stroke_alert") {
+                speakInstruction("Peringatan, asimetri terdeteksi. Usahakan angkat kedua tangan Anda lebih tegak dan sejajar.", true);
+            } else if (m.alert === "stroke_warning") {
+                speakInstruction("Angkat sedikit lagi agar posisi tangan lebih sejajar.", true);
+            }
+            app.lastVoiceAlert = now;
+        }
+    }
+    
+    // Sit-to-stand voice feedback
+    if (m.sts_phase && m.sts_phase !== app.lastStsPhase) {
+        if (m.sts_phase === "standing" && app.lastStsPhase === "transition") {
+            speakInstruction("Bagus, sekarang silakan duduk kembali.");
+        } else if (m.sts_phase === "sitting" && app.lastStsPhase === "transition") {
+            speakInstruction("Bagus, silakan berdiri kembali.");
+        }
+        app.lastStsPhase = m.sts_phase;
+    }
+    
     // Sit-to-stand
     if (m.sts_phase) { ["ph-sitting","ph-transition","ph-standing"].forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove("active"); }); const map = { sitting:"ph-sitting", transition:"ph-transition", standing:"ph-standing" }; if (map[m.sts_phase]) { const el = document.getElementById(map[m.sts_phase]); if (el) el.classList.add("active"); } }
     if (m.sts_duration != null) setText("sts-dur", m.sts_duration.toFixed(2) + " s");
