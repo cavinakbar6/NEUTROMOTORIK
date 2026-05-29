@@ -17,7 +17,11 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-    <link rel="stylesheet" href="css/style.css?v=2">
+    <!-- jsPDF + html2canvas (for PDF export) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
+
+    <link rel="stylesheet" href="css/style.css?v=3">
 </head>
 <body>
 
@@ -58,6 +62,7 @@
                 <span class="conn-dot"></span>
                 <span class="conn-text" id="conn-text">Connecting...</span>
             </div>
+            <button class="btn btn-sm" id="notif-btn" style="display:none;margin-top:8px;width:100%;background:var(--blue);color:white;border:none;border-radius:6px;padding:6px;cursor:pointer;font-size:11px">🔔 Enable Notifications</button>
         </div>
     </aside>
 
@@ -148,9 +153,15 @@
                     <div class="form-group form-actions">
                         <button class="btn btn-primary btn-lg" id="btn-start" onclick="app.startAssessment()">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                            Mulai Sekarang
+                            Mulai
                         </button>
                     </div>
+                </div>
+                <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+                    <button class="btn btn-primary btn-lg" style="width:100%;background:linear-gradient(135deg,#8b5cf6,#3b82f6)" onclick="app.startSequential()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                        Full Assessment (3-in-1) — Semua Tes Sekaligus
+                    </button>
                 </div>
             </div>
 
@@ -191,6 +202,15 @@
                 <div>
                     <h1 id="assess-title">Assessment</h1>
                     <p class="subtitle" id="assess-patient">Pasien: ---</p>
+                </div>
+                <!-- Sequential Step Indicator -->
+                <div id="seq-indicator" class="seq-indicator" style="display:none">
+                    <div class="seq-step active" id="seq-step-1"><span class="seq-num">1</span><span class="seq-label">Angkat</span></div>
+                    <div class="seq-arrow">→</div>
+                    <div class="seq-step" id="seq-step-2"><span class="seq-num">2</span><span class="seq-label">Berdiri</span></div>
+                    <div class="seq-arrow">→</div>
+                    <div class="seq-step" id="seq-step-3"><span class="seq-num">3</span><span class="seq-label">Duduk</span></div>
+                    <span class="seq-progress" id="seq-progress">0/3</span>
                 </div>
                 <div class="assess-controls">
                     <span class="timer" id="timer">00:00</span>
@@ -322,10 +342,10 @@
     </footer>
 
     <!-- Scripts -->
-    <script src="js/websocket-client.js?v=2"></script>
+    <script src="js/websocket-client.js?v=5"></script>
     <script src="js/skeleton-renderer.js?v=2"></script>
     <script src="js/chart-manager.js?v=2"></script>
-    <script src="js/main.js?v=2"></script>
+    <script src="js/main.js?v=4"></script>
 
 </body>
 </html>

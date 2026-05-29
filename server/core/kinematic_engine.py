@@ -65,13 +65,10 @@ class KinematicEngine:
 
     def _get_sts_threshold(self) -> float:
         """Get age-stratified STS warning threshold (detik)."""
-        if self.patient_age is None:
-            return STS_WARN_YOUNG
-        if self.patient_age >= 75:
-            return STS_WARN_VERY_OLD
-        if self.patient_age >= 65:
-            return STS_WARN_ELDERLY
-        return STS_WARN_YOUNG
+        # Gunakan sistem clinical_thresholds baru
+        from core.clinical_thresholds import SARCOPENIA
+        th = SARCOPENIA.get_thresholds(self.patient_age)
+        return th.monitor_max_s
 
     def _init_tracking_vars(self):
         """Init all tracking variables separately to fix indentation issues."""
@@ -139,6 +136,13 @@ class KinematicEngine:
         m = KinematicMetrics(frame=frame_id)
 
         # ── A. Shoulder angles (Hip → Shoulder → Elbow) ──
+        # Fallback: Jika pinggul tidak terlihat (sering terjadi jika duduk dekat kamera),
+        # buat titik pinggul virtual tepat di bawah bahu.
+        if L_HIP not in pts and L_SHOULDER in pts:
+            pts[L_HIP] = pts[L_SHOULDER] + np.array([0, 0.5, 0])
+        if R_HIP not in pts and R_SHOULDER in pts:
+            pts[R_HIP] = pts[R_SHOULDER] + np.array([0, 0.5, 0])
+
         theta_L = self._compute_angle(pts, L_SHOULDER, L_HIP, L_ELBOW)
         theta_R = self._compute_angle(pts, R_SHOULDER, R_HIP, R_ELBOW)
 

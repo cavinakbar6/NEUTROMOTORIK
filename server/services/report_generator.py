@@ -10,6 +10,18 @@ class ReportGenerator:
 
     @staticmethod
     def to_dict(report: ClinicalReport) -> dict:
+        # Compute confidence scores (0-1 scale)
+        stroke_conf = min(1.0, report.meanASI / 0.15) if report.meanASI > 0 else 0.0
+        parkinson_conf = 0.0
+        if report.dominant_freq and 3.0 <= report.dominant_freq <= 15.0:
+            if report.dominant_freq >= 4.0 and report.dominant_freq <= 12.0:
+                parkinson_conf = 0.7 + (report.tremor_duration_pct or 0) * 0.3
+            else:
+                parkinson_conf = 0.3 + (report.tremor_duration_pct or 0) * 0.3
+        sarcopenia_conf = 0.0
+        if report.transition_duration:
+            sarcopenia_conf = min(1.0, report.transition_duration / 7.0)
+
         return {
             "report_id": report.session_id,
             "patient_id": report.patient_id,
@@ -37,6 +49,11 @@ class ReportGenerator:
                 "stroke": report.stroke_risk.value,
                 "parkinson": report.parkinson_risk.value,
                 "sarcopenia": report.sarcopenia_risk.value,
+            },
+            "confidence_scores": {
+                "stroke": round(stroke_conf, 3),
+                "parkinson": round(parkinson_conf, 3),
+                "sarcopenia": round(sarcopenia_conf, 3),
             },
             "recommendation": ReportGenerator._recommendation(report),
             "narrative": ReportGenerator._narrative(report),

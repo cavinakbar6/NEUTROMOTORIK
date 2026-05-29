@@ -9,11 +9,8 @@
 
 class WSClient {
     constructor(url) {
-        // Dynamic URL: gunakan host yang sama dengan halaman web
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const host = window.location.hostname || "localhost";
-        const port = window.location.port || "8765";
-        this.url = url || `${protocol}//${host}:${port}/ws/stream`;
+        // Hardcode port 8765 karena backend Python berjalan di port ini (terpisah dari web server Vite/Live Server)
+        this.url = url || `ws://127.0.0.1:8765/ws/stream`;
 
         this.ws = null;
         this.connected = false;
@@ -63,9 +60,16 @@ class WSClient {
 
     _route(data) {
         switch (data.type) {
-            case "metrics":   if (this.onMetrics) this.onMetrics(data); break;
-            case "report":    if (this.onReport)  this.onReport(data.report); break;
-            case "ack":       if (this.onAck)     this.onAck(data); break;
+            case "metrics":           if (this.onMetrics) this.onMetrics(data); break;
+            case "report":            if (this.onReport)  this.onReport(data.report); break;
+            case "step_report":       if (this.onReport)  this.onReport(data.report); break;
+            case "sequential_report": if (this.onReport)  this.onReport(data.aggregated); break;
+            case "sequential_ack":    console.log("[WS] Sequential:", data); break;
+            case "ack":               if (this.onAck)     this.onAck(data); break;
+            case "alert":
+                console.warn("[WS] Alert:", data.alert_type, data.message);
+                if (this.onMetrics) this.onMetrics(data); // pass alert through metrics handler
+                break;
             case "heartbeat":
                 this.latency = Math.round(performance.now() - this.lastPing);
                 break;
@@ -93,6 +97,17 @@ class WSClient {
             instruction: instruction,
         };
         // Include age if provided (for age-stratified sarcopenia thresholds)
+        if (age != null && age !== "" && !isNaN(parseInt(age))) {
+            msg.age = parseInt(age);
+        }
+        this.send(msg);
+    }
+
+    startSequential(patientId, age) {
+        const msg = {
+            type: "sequential_start",
+            patient_id: patientId,
+        };
         if (age != null && age !== "" && !isNaN(parseInt(age))) {
             msg.age = parseInt(age);
         }
