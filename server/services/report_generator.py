@@ -10,6 +10,42 @@ class ReportGenerator:
 
     @staticmethod
     def to_dict(report: ClinicalReport) -> dict:
+        # ── Rehab sessions: return gamification-friendly structure ──
+        if report.instruction and report.instruction.startswith("rehab_"):
+            avg_form = report.shoulder_angle_L_mean  # Re-purposed field for form score
+            total_reps = int(report.meanASI)          # Re-purposed field for rep count
+            duration = report.transition_duration or 0.0
+            instruction_label = "Angkat Tangan" if report.instruction == "rehab_arm_raise" else "Jongkok & Berdiri"
+            if avg_form >= 85:
+                summary = "Kualitas gerakan sempurna!"
+            elif avg_form >= 60:
+                summary = "Kualitas gerakan baik!"
+            elif avg_form >= 30:
+                summary = "Kualitas gerakan cukup, perlu perbaikan."
+            else:
+                summary = "Latihan belum optimal, coba lagi."
+            return {
+                "report_id": report.session_id,
+                "patient_id": report.patient_id,
+                "timestamp": report.timestamp.isoformat(),
+                "instruction": report.instruction,
+                "instruction_label": instruction_label,
+                "reps": total_reps,
+                "score": round(avg_form, 1),
+                "duration_s": round(duration, 1),
+                "risk_levels": {
+                    "stroke": "normal",
+                    "parkinson": "normal",
+                    "sarcopenia": "normal",
+                },
+                "confidence_scores": {
+                    "overall": round(min(100, avg_form), 1),
+                },
+                "recommendation": summary,
+                "narrative": report.ai_narrative or f"Latihan {instruction_label} selesai: {total_reps} repetisi, skor {avg_form:.0f}%. {summary}",
+            }
+
+        # ── Clinical sessions: original report generation ──
         # Compute confidence scores (0-1 scale)
         stroke_conf = min(1.0, report.meanASI / 0.15) if report.meanASI > 0 else 0.0
         parkinson_conf = 0.0

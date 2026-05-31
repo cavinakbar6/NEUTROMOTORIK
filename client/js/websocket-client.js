@@ -24,6 +24,7 @@ class WSClient {
         this.onAck = null;
         this.onError = null;
         this.onStatusChange = null;
+        this.onRehabMetrics = null;
     }
 
     connect() {
@@ -61,6 +62,7 @@ class WSClient {
     _route(data) {
         switch (data.type) {
             case "metrics":           if (this.onMetrics) this.onMetrics(data); break;
+            case "rehab_metrics":     if (this.onRehabMetrics) this.onRehabMetrics(data); break;
             case "report":            if (this.onReport)  this.onReport(data.report); break;
             case "step_report":       if (this.onReport)  this.onReport(data.report); break;
             case "sequential_report": if (this.onReport)  this.onReport(data.aggregated); break;

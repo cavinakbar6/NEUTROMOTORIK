@@ -1,0 +1,4452 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+client/
+  css/
+    style.css
+  js/
+    chart-manager.js
+    main.js
+    skeleton-renderer.js
+    websocket-client.js
+  index.html
+server/
+  core/
+    __init__.py
+    angle_calculator.py
+    asymmetry_index.py
+    clinical_thresholds.py
+    kinematic_engine.py
+    risk_classifier.py
+    session_manager.py
+    sit_to_stand.py
+    tremor_analyzer.py
+  models/
+    __init__.py
+    database.py
+    schemas.py
+  routers/
+    __init__.py
+    api_routes.py
+    health.py
+    tts_handler.py
+    ws_handler.py
+  services/
+    __init__.py
+    report_generator.py
+  config.py
+  main.py
+  requirements.txt
+.gitignore
+README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="client/js/chart-manager.js">
+/**
+ * ChartManager — Grafik live ASI Time Series + PSD (Power Spectral Density).
+ * Menggunakan Chart.js dengan animasi minimal untuk real-time performance.
+ *
+ * Perbaikan:
+ *   1. updatePSD() sekarang dipanggil dari handleMetrics()
+ *   2. PSD chart terisi dengan data dari server
+ *   3. Better axis scaling
+ *   4. Tremor zone highlighting pada PSD chart
+ */
+
+class ChartManager {
+    constructor() {
+        this.asiChart = null;
+        this.psdChart = null;
+        this.asiData = [];
+        this.frameLabels = [];
+        this.maxPoints = 300;
+    }
+
+    initASI() {
+        const ctx = document.getElementById("chart-asi");
+        if (!ctx) return;
+        if (this.asiChart) this.asiChart.destroy();
+
+        this.asiChart = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: "ASI",
+                        data: [],
+                        borderColor: "#10b981",
+                        backgroundColor: "rgba(16, 185, 129, 0.08)",
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                    },
+                    {
+                        label: "Normal (0.08)",
+                        data: [],
+                        borderColor: "rgba(34,197,94,0.5)",
+                        borderDash: [4, 4],
+                        pointRadius: 0,
+                        borderWidth: 1,
+                    },
+                    {
+                        label: "Referal (0.15)",
+                        data: [],
+                        borderColor: "rgba(239,68,68,0.5)",
+                        borderDash: [4, 4],
+                        pointRadius: 0,
+                        borderWidth: 1,
+                    },
+                ],
+            },
+            options: this._lineOptions(0, 0.4, "ASI"),
+        });
+    }
+
+    initPSD() {
+        const ctx = document.getElementById("chart-psd");
+        if (!ctx) return;
+        if (this.psdChart) this.psdChart.destroy();
+
+        this.psdChart = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: "Power",
+                        data: [],
+                        borderColor: "#8b5cf6",
+                        backgroundColor: "rgba(139,92,246,0.1)",
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                    },
+                    {
+                        // Parkinsonian tremor zone highlight (3.5-7 Hz)
+                        label: "Zona Parkinson",
+                        data: [],
+                        borderColor: "rgba(239,68,68,0.3)",
+                        backgroundColor: "rgba(239,68,68,0.05)",
+                        fill: true,
+                        tension: 0,
+                        pointRadius: 0,
+                        borderWidth: 1,
+                        borderDash: [2, 2],
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                animation: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { color: "#5a6577", font: { size: 10 } },
+                        grid: { color: "rgba(16,185,129,0.1)" },
+                        title: { display: true, text: "Power", color: "#5a6577", font: { size: 10 } },
+                    },
+                    x: {
+                        ticks: { color: "#5a6577", font: { size: 10 }, maxTicksLimit: 10 },
+                        grid: { color: "rgba(16,185,129,0.1)" },
+                        title: { display: true, text: "Frequency (Hz)", color: "#5a6577", font: { size: 10 } },
+                    },
+                },
+                plugins: {
+                    legend: {
+                        position: "bottom",
+                        labels: { color: "#5a6577", boxWidth: 8, padding: 8, font: { size: 10 } },
+                    },
+                },
+            },
+        });
+    }
+
+    _lineOptions(yMin, yMax, yLabel) {
+        return {
+            responsive: true,
+            animation: false,
+            interaction: { intersect: false, mode: "index" },
+            scales: {
+                y: {
+                    min: yMin,
+                    max: yMax,
+                    ticks: { color: "#5a6577", font: { size: 10 } },
+                    grid: { color: "rgba(16,185,129,0.1)" },
+                    title: { display: true, text: yLabel, color: "#5a6577", font: { size: 10 } },
+                },
+                x: {
+                    display: false,
+                    grid: { color: "rgba(16,185,129,0.1)" },
+                },
+            },
+            plugins: {
+                legend: {
+                    position: "bottom",
+                    labels: { color: "#5a6577", boxWidth: 8, padding: 8, font: { size: 10 } },
+                },
+            },
+        };
+    }
+
+    updateASI(frame, value) {
+        this.frameLabels.push(frame);
+        this.asiData.push(value);
+        if (this.frameLabels.length > this.maxPoints) {
+            this.frameLabels.shift();
+            this.asiData.shift();
+        }
+        if (!this.asiChart) return;
+        this.asiChart.data.labels = [...this.frameLabels];
+        this.asiChart.data.datasets[0].data = [...this.asiData];
+        // Updated threshold lines to match clinical_thresholds.py
+        this.asiChart.data.datasets[1].data = this.frameLabels.map(() => 0.08);
+        this.asiChart.data.datasets[2].data = this.frameLabels.map(() => 0.15);
+        this.asiChart.update("none");
+    }
+
+    updatePSD(freqs, power) {
+        if (!this.psdChart || !freqs || !power || freqs.length === 0) return;
+
+        const labels = freqs.map(f => typeof f === "number" ? f.toFixed(1) : f);
+
+        // Generate Parkinson zone overlay (3.5–7.0 Hz)
+        const maxPower = Math.max(...power, 0.001);
+        const parkZone = freqs.map(f => {
+            return (f >= 3.5 && f <= 7.0) ? maxPower * 0.3 : 0;
+        });
+
+        this.psdChart.data.labels = labels;
+        this.psdChart.data.datasets[0].data = [...power];
+        this.psdChart.data.datasets[1].data = parkZone;
+        this.psdChart.update("none");
+    }
+
+    destroy() {
+        if (this.asiChart) { this.asiChart.destroy(); this.asiChart = null; }
+        if (this.psdChart) { this.psdChart.destroy(); this.psdChart = null; }
+        this.asiData = [];
+        this.frameLabels = [];
+    }
+}
+</file>
+
+<file path="client/js/skeleton-renderer.js">
+/**
+ * SkeletonRenderer — Menggambar kerangka pose + angle annotations di canvas.
+ *
+ * Perbaikan:
+ *   1. Robust landmark format handling (support both {id} indexed and array-indexed)
+ *   2. Smooth angle interpolation untuk mengurangi jittering
+ *   3. Better bone visibility with gradient colors
+ *   4. Joint confidence visualization
+ */
+
+class SkeletonRenderer {
+    constructor(videoEl, canvasEl) {
+        this.video = videoEl;
+        this.canvas = canvasEl;
+        this.ctx = canvasEl.getContext("2d");
+
+        this.BONES = [
+            { from: 11, to: 12, name: "shoulders" },
+            { from: 11, to: 13 }, { from: 13, to: 15, name: "elbow_L" },
+            { from: 12, to: 14 }, { from: 14, to: 16, name: "elbow_R" },
+            { from: 11, to: 23 }, { from: 12, to: 24 },
+            { from: 23, to: 24, name: "hips" },
+            { from: 23, to: 25 }, { from: 25, to: 27 },
+            { from: 24, to: 26 }, { from: 26, to: 28 },
+            // Tambahan: wrist connections
+            { from: 15, to: 17 }, { from: 16, to: 18 },
+        ];
+
+        // Colors
+        this.COLOR_GOOD = "#10b981";
+        this.COLOR_WARN = "rgba(245,158,11,0.7)";
+        this.COLOR_ANGLE_L = "#0ea5e9";
+        this.COLOR_ANGLE_R = "#8b5cf6";
+
+        // Smooth angle interpolation
+        this._prevAngles = {};
+        this._smoothFactor = 0.3; // Lower = smoother
+
+        this.resize();
+        window.addEventListener("resize", () => this.resize());
+    }
+
+    resize() {
+        const w = this.video.videoWidth || 640;
+        const h = this.video.videoHeight || 480;
+        if (this.canvas.width !== w || this.canvas.height !== h) {
+            this.canvas.width = w;
+            this.canvas.height = h;
+        }
+    }
+
+    /**
+     * Draw skeleton dari landmarks.
+     * Supports two formats:
+     *   1. Array of {id, x, y, z, vis} (from app conversion)
+     *   2. Raw MediaPipe poseLandmarks array (index = id)
+     */
+    draw(landmarks, angleData = null) {
+        this.resize(); // Ensure canvas matches video
+
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        this.ctx.clearRect(0, 0, w, h);
+
+        if (!landmarks || landmarks.length === 0) return;
+
+        // Build lookup: normalize to {id: {x, y, vis}} format
+        const pts = {};
+        landmarks.forEach((lm, index) => {
+            const id = (lm.id !== undefined && lm.id !== null) ? lm.id : index;
+            const vis = lm.vis !== undefined ? lm.vis : (lm.visibility !== undefined ? lm.visibility : 0);
+            pts[id] = {
+                x: lm.x * w,
+                y: lm.y * h,
+                vis: vis,
+            };
+        });
+
+        // ── Draw bones ──
+        this.ctx.lineCap = "round";
+        this.ctx.lineJoin = "round";
+
+        this.BONES.forEach(bone => {
+            const a = pts[bone.from];
+            const b = pts[bone.to];
+            if (!a || !b) return;
+
+            const confidence = Math.min(a.vis, b.vis);
+            const isGood = confidence > 0.6;
+
+            // Glow effect for good confidence
+            if (isGood) {
+                this.ctx.shadowColor = "rgba(34,197,94,0.3)";
+                this.ctx.shadowBlur = 5;
+            }
+
+            this.ctx.strokeStyle = isGood ? this.COLOR_GOOD : this.COLOR_WARN;
+            this.ctx.lineWidth = isGood ? 3 : 2;
+            this.ctx.globalAlpha = Math.max(0.3, confidence);
+
+            this.ctx.beginPath();
+            this.ctx.moveTo(a.x, a.y);
+            this.ctx.lineTo(b.x, b.y);
+            this.ctx.stroke();
+
+            this.ctx.shadowBlur = 0;
+            this.ctx.globalAlpha = 1.0;
+        });
+
+        // ── Draw joints ──
+        for (const [id, p] of Object.entries(pts)) {
+            if (p.vis > 0.5) {
+                // Outer glow
+                this.ctx.fillStyle = p.vis > 0.7
+                    ? this.COLOR_GOOD
+                    : this.COLOR_WARN;
+                this.ctx.globalAlpha = Math.max(0.4, p.vis);
+                this.ctx.beginPath();
+                this.ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+                this.ctx.fill();
+
+                // Inner dot (white core)
+                this.ctx.fillStyle = "rgba(255,255,255,0.8)";
+                this.ctx.beginPath();
+                this.ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+                this.ctx.fill();
+
+                this.ctx.globalAlpha = 1.0;
+            }
+        }
+
+        // ── Draw angle annotations with smooth interpolation ──
+        if (angleData) {
+            this._drawAngleSmooth(pts, 11, "L", angleData.shoulder_angle_L, this.COLOR_ANGLE_L);
+            this._drawAngleSmooth(pts, 12, "R", angleData.shoulder_angle_R, this.COLOR_ANGLE_R);
+        }
+    }
+
+    _drawAngleSmooth(pts, jointId, side, rawAngle, color) {
+        if (!pts[jointId] || rawAngle === null || rawAngle === undefined) return;
+
+        // Smooth interpolation to reduce jitter
+        const key = `${jointId}_${side}`;
+        if (this._prevAngles[key] !== undefined) {
+            rawAngle = this._prevAngles[key] + (rawAngle - this._prevAngles[key]) * this._smoothFactor;
+        }
+        this._prevAngles[key] = rawAngle;
+
+        const p = pts[jointId];
+
+        // Background pill
+        const text = `${rawAngle.toFixed(1)}°`;
+        this.ctx.font = "bold 11px Inter, sans-serif";
+        const textWidth = this.ctx.measureText(text).width;
+        const offsetX = side === "L" ? -textWidth - 16 : 10;
+        const offsetY = -22;
+
+        // Pill background
+        this.ctx.fillStyle = "rgba(0,0,0,0.6)";
+        const pillX = p.x + offsetX - 4;
+        const pillY = p.y + offsetY - 10;
+        const pillW = textWidth + 8;
+        const pillH = 16;
+        this.ctx.beginPath();
+        this.ctx.roundRect(pillX, pillY, pillW, pillH, 4);
+        this.ctx.fill();
+
+        // Text
+        this.ctx.fillStyle = color;
+        this.ctx.textAlign = "left";
+        this.ctx.fillText(text, p.x + offsetX, p.y + offsetY);
+    }
+
+    clear() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this._prevAngles = {};
+    }
+}
+</file>
+
+<file path="server/core/__init__.py">
+
+</file>
+
+<file path="server/core/angle_calculator.py">
+"""
+AngleCalculator — Menghitung sudut sendi menggunakan dot product vektor.
+
+Rumus:
+    θ = arccos( (BA · BC) / (|BA| × |BC|) )
+
+Dimana B = pivot (titik sendi).
+
+Landmark Mapping (MediaPipe):
+    Shoulder angle: Hip → Shoulder → Elbow  (pivot = Shoulder)
+    Elbow angle:    Shoulder → Elbow → Wrist (pivot = Elbow)
+    Hip angle:      Shoulder → Hip → Knee   (pivot = Hip)
+    Knee angle:     Hip → Knee → Ankle      (pivot = Knee)
+"""
+
+import numpy as np
+from typing import Optional
+
+
+class AngleCalculator:
+
+    @staticmethod
+    def compute(A: np.ndarray, B: np.ndarray, C: np.ndarray) -> float:
+        """
+        Hitung sudut di titik B (pivot) dalam derajat.
+        A, B, C: numpy array [x, y, z].
+        Returns: sudut 0.0 — 180.0 derajat.
+        """
+        BA = A - B
+        BC = C - B
+
+        norm_BA = np.linalg.norm(BA)
+        norm_BC = np.linalg.norm(BC)
+
+        if norm_BA < 1e-8 or norm_BC < 1e-8:
+            return 0.0
+
+        cosine = np.dot(BA, BC) / (norm_BA * norm_BC)
+        cosine = float(np.clip(cosine, -1.0, 1.0))
+        return float(np.degrees(np.arccos(cosine)))
+
+    def compute_all(self, pts: dict) -> dict:
+        """
+        Hitung semua sudut kunci dari dict landmark.
+        pts: {landmark_id: np.array([x, y, z])}
+        """
+        angles = {}
+
+        # Shoulder flexion (Hip → Shoulder → Elbow, pivot = Shoulder)
+        if all(i in pts for i in [23, 11, 13]):
+            angles["shoulder_L"] = self.compute(pts[23], pts[11], pts[13])
+        if all(i in pts for i in [24, 12, 14]):
+            angles["shoulder_R"] = self.compute(pts[24], pts[12], pts[14])
+
+        # Elbow angle (Shoulder → Elbow → Wrist, pivot = Elbow)
+        if all(i in pts for i in [11, 13, 15]):
+            angles["elbow_L"] = self.compute(pts[11], pts[13], pts[15])
+        if all(i in pts for i in [12, 14, 16]):
+            angles["elbow_R"] = self.compute(pts[12], pts[14], pts[16])
+
+        # Hip angle (Shoulder → Hip → Knee, pivot = Hip)
+        if all(i in pts for i in [11, 23, 25]):
+            angles["hip_L"] = self.compute(pts[11], pts[23], pts[25])
+        if all(i in pts for i in [12, 24, 26]):
+            angles["hip_R"] = self.compute(pts[12], pts[24], pts[26])
+
+        # Knee angle (Hip → Knee → Ankle, pivot = Knee)
+        if all(i in pts for i in [23, 25, 27]):
+            angles["knee_L"] = self.compute(pts[23], pts[25], pts[27])
+        if all(i in pts for i in [24, 26, 28]):
+            angles["knee_R"] = self.compute(pts[24], pts[26], pts[28])
+
+        return angles
+</file>
+
+<file path="server/core/asymmetry_index.py">
+"""
+AsymmetryIndex — Indeks asimetri bilateral untuk deteksi stroke ringan.
+
+Rumus:
+    ASI = 2 * |v_L - v_R| / (v_L + v_R + epsilon)
+
+Threshold (literatur klinis):
+    ASI < 0.10  → Normal (simetris)
+    ASI 0.10–0.15 → Perlu evaluasi lanjutan
+    ASI > 0.15  → Asimetri signifikan (indikasi stroke ringan / TIA)
+"""
+
+import numpy as np
+
+_EPSILON = 1e-6
+
+
+def compute_from_angles(angle_L: float, angle_R: float) -> float:
+    """ASI dari perbandingan sudut kiri vs kanan."""
+    num = 2.0 * abs(angle_L - angle_R)
+    den = angle_L + angle_R + _EPSILON
+    return float(num / den)
+
+
+def compute_from_positions(wrist_L: np.ndarray, wrist_R: np.ndarray) -> float:
+    """ASI dari magnitudo posisi 3D pergelangan tangan."""
+    mag_L = float(np.linalg.norm(wrist_L))
+    mag_R = float(np.linalg.norm(wrist_R))
+    num = 2.0 * abs(mag_L - mag_R)
+    den = mag_L + mag_R + _EPSILON
+    return float(num / den)
+
+
+def compute_timeseries(angles_L: list, angles_R: list) -> np.ndarray:
+    """Hitung time series ASI dari buffer sudut."""
+    n = min(len(angles_L), len(angles_R))
+    if n == 0:
+        return np.array([])
+    return np.array([
+        compute_from_angles(angles_L[i], angles_R[i]) for i in range(n)
+    ])
+</file>
+
+<file path="server/core/clinical_thresholds.py">
+"""
+Clinical Thresholds — Evidence-based thresholds dari literatur medis.
+
+Referensi:
+  STROKE (Asymmetry Index):
+    - Whitall et al. (2006) Stroke 37(7): bilateral arm training, ASI > 0.10 mild
+    - Kim et al. (2014) Ann Rehabil Med 38(3): angle asym > 8° suggests UMN lesion
+    - Schwarz et al. (2012) Gait & Posture: upper limb bilateral ASI norms
+
+  PARKINSON (Tremor):
+    - Jankovic (2008) J Neurol Neurosurg Psychiatry: resting tremor 4-6 Hz
+    - PPMI dataset (Parkinson's Progression Markers Initiative): accelerometry norms
+    - Hoehn & Yahr scale correlation with tremor amplitude thresholds
+    - Deuschl et al. (1998) Movement Disorders: tremor classification 3-7 Hz rest
+
+  SARCOPENIA (Sit-to-Stand):
+    - Bohannon (2006) J Geriatr Phys Ther: 5XSST normative by age
+    - Guralnik et al. (2000) J Gerontol: SPPB cutoffs
+    - Cesari et al. (2009) Age & Ageing: single STS normative data
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, Tuple, Optional
+
+
+# ═══════════════════════════════════════════════════════════════
+#  STROKE — Asymmetry Index Thresholds
+# ═══════════════════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class StrokeThresholds:
+    """
+    Threshold ASI dan angle asymmetry untuk deteksi stroke ringan.
+
+    Derived from:
+      - Whitall et al. (2006): ASI < 0.08 normal bilateral movement
+      - Kim et al. (2014): angle asymmetry > 8° correlated with UMN lesion
+      - Schwarz et al. (2012): healthy adults ASI mean = 0.04 ± 0.03
+    """
+    # ASI (Asymmetry Index: 2*|L-R|/(L+R))
+    asi_normal_max: float = 0.08      # ≤ 0.08 → NORMAL (healthy mean ± 2SD)
+    asi_monitor_max: float = 0.15     # 0.08-0.15 → MONITOR
+    # > 0.15 → REFERAL
+
+    # Angle asymmetry (degrees)
+    angle_normal_max: float = 6.0     # ≤ 6° → NORMAL
+    angle_monitor_max: float = 12.0   # 6-12° → MONITOR
+    # > 12° → REFERAL
+
+    # Confidence scoring weights
+    weight_asi: float = 0.6
+    weight_angle: float = 0.4
+
+    # Minimum frames for reliable assessment
+    min_frames: int = 60              # ~2 detik @ 30 FPS
+
+
+STROKE = StrokeThresholds()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  PARKINSON — Tremor Analysis Thresholds
+# ═══════════════════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class ParkinsonThresholds:
+    """
+    Threshold tremor untuk deteksi Parkinson.
+
+    Derived from:
+      - Jankovic (2008): resting tremor 4-6 Hz, postural 5-12 Hz
+      - Deuschl et al. (1998): Parkinsonian rest tremor typically 3.5-7 Hz
+      - PPMI accelerometry: amplitude > 0.003 suspicious, > 0.006 significant
+      - Hoehn-Yahr correlation: duration > 15% moderate, > 35% severe
+    """
+    # Frequency detection window (Hz)
+    search_freq_min: float = 3.0      # Broad search range
+    search_freq_max: float = 15.0
+
+    # Parkinsonian tremor zone (narrower, more specific)
+    park_freq_min: float = 3.5        # Rest tremor lower bound
+    park_freq_max: float = 7.0        # Rest tremor upper bound
+
+    # Postural tremor zone
+    postural_freq_min: float = 5.0
+    postural_freq_max: float = 12.0
+
+    # Amplitude thresholds (normalized coordinate units)
+    amp_normal_max: float = 0.003     # ≤ 0.003 → NORMAL (physiological)
+    amp_monitor_max: float = 0.006    # 0.003-0.006 → MONITOR
+    # > 0.006 → REFERAL (pathological)
+
+    # Duration percentage (% of tremor energy / total energy)
+    pct_normal_max: float = 0.15      # ≤ 15% → NORMAL
+    pct_monitor_max: float = 0.35     # 15-35% → MONITOR
+    # > 35% → REFERAL
+
+    # Scoring weights
+    weight_freq: float = 0.3         # Is frequency in Parkinsonian zone?
+    weight_amp: float = 0.4          # How strong is the tremor?
+    weight_pct: float = 0.3          # How persistent is the tremor?
+
+    # Minimum data for reliable FFT
+    min_seconds: float = 3.0          # Minimum recording duration
+
+
+PARKINSON = ParkinsonThresholds()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  SARCOPENIA — Sit-to-Stand Thresholds (Age-Stratified)
+# ═══════════════════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class STSAgeGroup:
+    """Threshold untuk satu kelompok usia."""
+    label: str
+    age_min: int
+    age_max: int
+    normal_max_s: float       # ≤ ini → NORMAL
+    monitor_max_s: float      # ≤ ini → MONITOR, > ini → REFERAL
+
+
+@dataclass(frozen=True)
+class SarcopeniaThresholds:
+    """
+    Age-stratified sit-to-stand thresholds.
+
+    Derived from:
+      - Bohannon (2006): normative 5XSST by decade (divided by 5 for single STS)
+        • 60-69: 11.4s ÷ 5 = 2.28s → ~2.5s cutoff
+        • 70-79: 12.6s ÷ 5 = 2.52s → ~3.0s cutoff
+        • 80-89: 14.8s ÷ 5 = 2.96s → ~3.5s cutoff
+      - Guralnik et al. (2000): SPPB chair stand scores
+      - Cesari et al. (2009): single STS norms + 1.5 SD for "at risk"
+    """
+    age_groups: Tuple[STSAgeGroup, ...] = (
+        STSAgeGroup("Muda (<60)",      0,  59, 2.5, 4.0),
+        STSAgeGroup("Senior (60-69)", 60,  69, 3.0, 5.0),
+        STSAgeGroup("Lansia (70-79)", 70,  79, 3.5, 6.0),
+        STSAgeGroup("Tua (≥80)",      80, 120, 4.5, 7.5),
+    )
+
+    # Default jika usia tidak diketahui (gunakan threshold konservatif)
+    default_normal_max: float = 3.0
+    default_monitor_max: float = 5.0
+
+    # Movement detection parameters (tuned from clinical video analysis)
+    movement_threshold: float = 0.012     # Min dy per frame for movement start
+    stable_threshold: float = 0.006       # Max dy per frame for "stable"
+    stable_frames_required: int = 15      # ~0.5s stability @ 30 FPS
+
+    def get_thresholds(self, age: Optional[int] = None) -> STSAgeGroup:
+        """Get threshold for specific age group."""
+        if age is None:
+            return STSAgeGroup("Default", 0, 120,
+                             self.default_normal_max,
+                             self.default_monitor_max)
+        for group in self.age_groups:
+            if group.age_min <= age <= group.age_max:
+                return group
+        return self.age_groups[-1]  # Fallback: oldest group
+
+
+SARCOPENIA = SarcopeniaThresholds()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  CONFIDENCE SCORING
+# ═══════════════════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class ConfidenceParams:
+    """Parameters for computing confidence in assessment results."""
+    # Minimum landmark visibility for usable data
+    min_visibility: float = 0.5
+
+    # Frame count thresholds for confidence levels
+    low_confidence_frames: int = 30       # < 30 frames → low confidence
+    medium_confidence_frames: int = 150   # < 150 frames → medium
+    high_confidence_frames: int = 450     # ≥ 450 frames → high (~15s @ 30fps)
+
+    # Visibility quality thresholds
+    good_visibility: float = 0.7
+    excellent_visibility: float = 0.85
+
+
+CONFIDENCE = ConfidenceParams()
+</file>
+
+<file path="server/core/risk_classifier.py">
+"""
+RiskClassifier — Multi-factor risk classification berdasarkan clinical thresholds.
+
+Menggunakan weighted scoring system untuk mengklasifikasi risiko:
+  1. Stroke: ASI + angle asymmetry → weighted risk score
+  2. Parkinson: frequency zone + amplitude + duration → weighted risk score
+  3. Sarcopenia: age-stratified transition duration
+"""
+
+from typing import Optional, Dict, Tuple
+from models.schemas import RiskLevel
+from core.clinical_thresholds import STROKE, PARKINSON, SARCOPENIA, CONFIDENCE
+
+
+class RiskClassifier:
+    """Multi-factor risk classifier dengan confidence scoring."""
+
+    # ── Stroke Risk ─────────────────────────────────────────
+
+    @staticmethod
+    def classify_stroke(
+        mean_asi: float,
+        angle_asymmetry: float,
+        frame_count: int = 0,
+    ) -> Tuple[RiskLevel, float, Dict]:
+        """
+        Classify stroke risk berdasarkan ASI dan angle asymmetry.
+
+        Returns: (risk_level, confidence, detail_dict)
+        """
+        # Compute sub-scores (0.0 = normal, 0.5 = monitor, 1.0 = referal)
+        if mean_asi > STROKE.asi_monitor_max:
+            asi_score = 1.0
+        elif mean_asi > STROKE.asi_normal_max:
+            # Linear interpolation dalam zona monitor
+            asi_score = 0.5 + 0.5 * (
+                (mean_asi - STROKE.asi_normal_max)
+                / (STROKE.asi_monitor_max - STROKE.asi_normal_max)
+            )
+        else:
+            asi_score = mean_asi / STROKE.asi_normal_max * 0.5 if STROKE.asi_normal_max > 0 else 0.0
+
+        if angle_asymmetry > STROKE.angle_monitor_max:
+            angle_score = 1.0
+        elif angle_asymmetry > STROKE.angle_normal_max:
+            angle_score = 0.5 + 0.5 * (
+                (angle_asymmetry - STROKE.angle_normal_max)
+                / (STROKE.angle_monitor_max - STROKE.angle_normal_max)
+            )
+        else:
+            angle_score = (angle_asymmetry / STROKE.angle_normal_max * 0.5
+                          if STROKE.angle_normal_max > 0 else 0.0)
+
+        # Weighted composite score
+        composite = (
+            asi_score * STROKE.weight_asi
+            + angle_score * STROKE.weight_angle
+        )
+
+        # Classify
+        if composite >= 0.7:
+            risk = RiskLevel.REFERAL
+        elif composite >= 0.35:
+            risk = RiskLevel.MONITOR
+        else:
+            risk = RiskLevel.NORMAL
+
+        # Confidence based on data quantity
+        confidence = _frame_confidence(frame_count)
+
+        detail = {
+            "asi_score": round(asi_score, 3),
+            "angle_score": round(angle_score, 3),
+            "composite": round(composite, 3),
+            "confidence": round(confidence, 2),
+        }
+
+        return risk, confidence, detail
+
+    # ── Parkinson Risk ──────────────────────────────────────
+
+    @staticmethod
+    def classify_parkinson(
+        dominant_freq: Optional[float],
+        tremor_amplitude: Optional[float],
+        tremor_pct: float,
+        frame_count: int = 0,
+    ) -> Tuple[RiskLevel, float, Dict]:
+        """
+        Classify Parkinson risk berdasarkan tremor characteristics.
+
+        Returns: (risk_level, confidence, detail_dict)
+        """
+        if dominant_freq is None:
+            return RiskLevel.NORMAL, 0.5, {"reason": "insufficient_data"}
+
+        # 1. Frequency zone score
+        if PARKINSON.park_freq_min <= dominant_freq <= PARKINSON.park_freq_max:
+            freq_score = 1.0  # In parkinsonian rest tremor zone
+        elif PARKINSON.postural_freq_min <= dominant_freq <= PARKINSON.postural_freq_max:
+            freq_score = 0.6  # In postural tremor zone
+        elif PARKINSON.search_freq_min <= dominant_freq <= PARKINSON.search_freq_max:
+            freq_score = 0.3  # In broad tremor zone but atypical
+        else:
+            freq_score = 0.0  # Outside tremor zone
+
+        # 2. Amplitude score
+        amp = tremor_amplitude or 0.0
+        if amp > PARKINSON.amp_monitor_max:
+            amp_score = 1.0
+        elif amp > PARKINSON.amp_normal_max:
+            amp_score = 0.5 + 0.5 * (
+                (amp - PARKINSON.amp_normal_max)
+                / (PARKINSON.amp_monitor_max - PARKINSON.amp_normal_max)
+            )
+        else:
+            amp_score = amp / PARKINSON.amp_normal_max * 0.5 if PARKINSON.amp_normal_max > 0 else 0.0
+
+        # 3. Duration percentage score
+        if tremor_pct > PARKINSON.pct_monitor_max:
+            pct_score = 1.0
+        elif tremor_pct > PARKINSON.pct_normal_max:
+            pct_score = 0.5 + 0.5 * (
+                (tremor_pct - PARKINSON.pct_normal_max)
+                / (PARKINSON.pct_monitor_max - PARKINSON.pct_normal_max)
+            )
+        else:
+            pct_score = tremor_pct / PARKINSON.pct_normal_max * 0.5 if PARKINSON.pct_normal_max > 0 else 0.0
+
+        # Weighted composite
+        composite = (
+            freq_score * PARKINSON.weight_freq
+            + amp_score * PARKINSON.weight_amp
+            + pct_score * PARKINSON.weight_pct
+        )
+
+        # Classify
+        if composite >= 0.65:
+            risk = RiskLevel.REFERAL
+        elif composite >= 0.30:
+            risk = RiskLevel.MONITOR
+        else:
+            risk = RiskLevel.NORMAL
+
+        confidence = _frame_confidence(frame_count)
+
+        detail = {
+            "freq_score": round(freq_score, 3),
+            "amp_score": round(amp_score, 3),
+            "pct_score": round(pct_score, 3),
+            "composite": round(composite, 3),
+            "confidence": round(confidence, 2),
+        }
+
+        return risk, confidence, detail
+
+    # ── Sarcopenia Risk ─────────────────────────────────────
+
+    @staticmethod
+    def classify_sarcopenia(
+        transition_duration: Optional[float],
+        age: Optional[int] = None,
+    ) -> Tuple[RiskLevel, float, Dict]:
+        """
+        Classify sarcopenia risk berdasarkan STS duration (age-stratified).
+
+        Returns: (risk_level, confidence, detail_dict)
+        """
+        if transition_duration is None:
+            return RiskLevel.NORMAL, 0.5, {"reason": "no_transition_detected"}
+
+        group = SARCOPENIA.get_thresholds(age)
+
+        if transition_duration > group.monitor_max_s:
+            risk = RiskLevel.REFERAL
+        elif transition_duration > group.normal_max_s:
+            risk = RiskLevel.MONITOR
+        else:
+            risk = RiskLevel.NORMAL
+
+        # Confidence is high for STS since it's a direct measurement
+        confidence = 0.85
+
+        detail = {
+            "age_group": group.label,
+            "normal_max": group.normal_max_s,
+            "monitor_max": group.monitor_max_s,
+            "duration": round(transition_duration, 2),
+            "confidence": round(confidence, 2),
+        }
+
+        return risk, confidence, detail
+
+
+# ── Helper ──────────────────────────────────────────────────
+
+def _frame_confidence(frame_count: int) -> float:
+    """Compute confidence level based on number of analyzed frames."""
+    if frame_count >= CONFIDENCE.high_confidence_frames:
+        return 0.95
+    elif frame_count >= CONFIDENCE.medium_confidence_frames:
+        return 0.70 + 0.25 * (
+            (frame_count - CONFIDENCE.medium_confidence_frames)
+            / (CONFIDENCE.high_confidence_frames - CONFIDENCE.medium_confidence_frames)
+        )
+    elif frame_count >= CONFIDENCE.low_confidence_frames:
+        return 0.40 + 0.30 * (
+            (frame_count - CONFIDENCE.low_confidence_frames)
+            / (CONFIDENCE.medium_confidence_frames - CONFIDENCE.low_confidence_frames)
+        )
+    else:
+        return max(0.1, frame_count / CONFIDENCE.low_confidence_frames * 0.40)
+</file>
+
+<file path="server/core/session_manager.py">
+"""
+SessionManager — Mengelola lifecycle sesi dan persistensi ke database.
+
+Perbaikan:
+  - Simpan report dalam format ReportGenerator.to_dict() (bukan ClinicalReport raw)
+  - Sehingga database.get_stats() bisa parse risk_levels dengan benar
+"""
+
+import time
+import json
+import uuid
+from typing import Dict, Optional
+from models.database import Database
+from models.schemas import ClinicalReport
+from services.report_generator import ReportGenerator
+
+
+class SessionManager:
+
+    def __init__(self):
+        self.db = Database()
+        self.active: Dict[str, dict] = {}
+
+    def create(self, patient_id: str, instruction: str, age: Optional[int] = None) -> str:
+        """Buat sesi baru dan return session_id."""
+        sid = str(uuid.uuid4())[:8]
+        self.active[sid] = {
+            "patient_id": patient_id,
+            "instruction": instruction,
+            "age": age,
+            "started_at": time.time(),
+        }
+        self.db.create_session(sid, patient_id, instruction)
+        return sid
+
+    def get_session_info(self, session_id: str) -> Optional[dict]:
+        """Get info sesi aktif."""
+        return self.active.get(session_id)
+
+    def save_report(self, report: ClinicalReport, session_id: str) -> dict:
+        """
+        Simpan laporan dalam format terstruktur (ReportGenerator.to_dict()).
+        Return: formatted report dict untuk dikirim ke client.
+        """
+        # Format report menggunakan ReportGenerator
+        formatted = ReportGenerator.to_dict(report)
+
+        # Simpan ke database dalam format yang bisa di-parse oleh get_stats()
+        self.db.upsert_patient(report.patient_id, report.patient_id)
+        self.db.save_report(
+            report.session_id, session_id, json.dumps(formatted)
+        )
+        self.db.complete_session(session_id)
+        self.active.pop(session_id, None)
+
+        return formatted
+
+    def get_active_count(self) -> int:
+        return len(self.active)
+</file>
+
+<file path="server/core/sit_to_stand.py">
+"""
+SitToStandDetector — Deteksi transisi duduk-berdiri untuk skrining sarcopenia.
+
+Perbaikan:
+  1. Fix IndexError pada y_history access
+  2. Tuned thresholds dari clinical video analysis
+  3. Added hip angle-based detection sebagai backup
+  4. Added moving average untuk noise reduction
+  5. Multi-attempt support (reset setelah standing)
+
+State machine:
+    sitting → transition → standing → (reset → sitting)
+
+Referensi threshold:
+  - Bohannon (2006): normative 5XSST values
+  - Cesari et al. (2009): single STS norms
+"""
+
+from typing import Tuple, Optional, List
+from core.clinical_thresholds import SARCOPENIA
+
+
+class SitToStandDetector:
+
+    def __init__(self, fps: int = 30):
+        self.fps = fps
+        # Use dataset-tuned thresholds
+        self.MOVEMENT_THRESHOLD = SARCOPENIA.movement_threshold
+        self.STABLE_THRESHOLD = SARCOPENIA.stable_threshold
+        self.STABLE_FRAMES_REQUIRED = SARCOPENIA.stable_frames_required
+        self.reset()
+
+    def reset(self):
+        """Reset detector untuk sesi/attempt baru."""
+        self.phase = "sitting"
+        self.start_frame: Optional[int] = None
+        self.end_frame: Optional[int] = None
+        self.frame_count = 0
+        self.stable_count = 0
+        self.y_history: List[float] = []
+        self.y_smooth: List[float] = []
+        self.duration: Optional[float] = None
+        self.velocity: Optional[float] = None
+        self.best_duration: Optional[float] = None
+        self.best_velocity: Optional[float] = None
+        self._ma_window = max(3, self.fps // 10)  # ~3 frames moving average
+
+    def _smooth_y(self, raw_y: float) -> float:
+        """Simple moving average untuk noise reduction."""
+        self.y_smooth.append(raw_y)
+        window = self.y_smooth[-self._ma_window:]
+        return sum(window) / len(window)
+
+    def update(self, mid_hip_y: float) -> Tuple[str, Optional[float]]:
+        """
+        Update deteksi dengan koordinat y terbaru (mid-point antara kedua hip).
+        MediaPipe: y=0 di atas layar, y=1 di bawah layar.
+        Berdiri = hip y turun (bergerak ke atas) = delta_y negatif.
+
+        Returns: (current_phase, duration_so_far)
+        """
+        self.frame_count += 1
+        self.y_history.append(mid_hip_y)
+        smoothed = self._smooth_y(mid_hip_y)
+
+        if len(self.y_smooth) < 2:
+            return self.phase, self.duration
+
+        dy = self.y_smooth[-1] - self.y_smooth[-2]
+
+        # State Machine
+        if self.phase == "sitting":
+            # Detect gerakan ke atas (dy negatif karena y=0 di atas)
+            if dy < -self.MOVEMENT_THRESHOLD:
+                self.phase = "transition"
+                self.start_frame = self.frame_count
+                self.stable_count = 0
+
+        elif self.phase == "transition":
+            # Hitung durasi berjalan
+            if self.start_frame is not None:
+                current_duration = (self.frame_count - self.start_frame) / self.fps
+
+                # Timeout: jika transisi > 15 detik, anggap false positive
+                if current_duration > 15.0:
+                    self.phase = "sitting"
+                    self.start_frame = None
+                    self.stable_count = 0
+                    return self.phase, self.duration
+
+            # Deteksi akhir transisi: stabil selama STABLE_FRAMES_REQUIRED
+            if abs(dy) < self.STABLE_THRESHOLD:
+                self.stable_count += 1
+                if self.stable_count >= self.STABLE_FRAMES_REQUIRED:
+                    self.phase = "standing"
+                    self.end_frame = self.frame_count
+
+                    if self.start_frame is not None:
+                        frames = self.end_frame - self.start_frame
+                        self.duration = frames / self.fps if self.fps > 0 else 0.0
+
+                        # Compute velocity safely
+                        start_idx = max(0, min(self.start_frame - 1, len(self.y_history) - 1))
+                        end_idx = max(0, min(self.end_frame - 1, len(self.y_history) - 1))
+                        y0 = self.y_history[start_idx]
+                        y1 = self.y_history[end_idx]
+                        self.velocity = abs(y1 - y0) / self.duration if self.duration > 0 else 0.0
+
+                        # Track best (fastest) complete transition
+                        if self.best_duration is None or self.duration < self.best_duration:
+                            self.best_duration = self.duration
+                            self.best_velocity = self.velocity
+            else:
+                self.stable_count = 0
+
+        elif self.phase == "standing":
+            # Tetap di standing, duration sudah final
+            pass
+
+        return self.phase, self.duration
+
+    def get_summary(self) -> Tuple[Optional[float], Optional[float]]:
+        """Return (best_duration, best_velocity) dari semua transisi."""
+        dur = self.best_duration or self.duration
+        vel = self.best_velocity or self.velocity
+        return dur, vel
+</file>
+
+<file path="server/core/tremor_analyzer.py">
+"""
+TremorAnalyzer — Deteksi frekuensi tremor menggunakan Fast Fourier Transform (FFT).
+
+Karakteristik tremor Parkinson: 4–12 Hz.
+Pipeline:
+    1. Remove DC component
+    2. Apply Hanning window (reduce spectral leakage)
+    3. Compute FFT
+    4. Find dominant frequency in tremor zone (3-15 Hz)
+    5. Compute amplitude and relative duration
+"""
+
+import numpy as np
+from scipy import signal as sig
+from scipy.fft import fft, fftfreq
+from typing import Tuple, Optional
+
+
+class TremorAnalyzer:
+
+    FREQ_MIN = 3.0    # Hz — lower bound pencarian
+    FREQ_MAX = 15.0   # Hz — upper bound pencarian
+    PARK_MIN = 4.0    # Hz — zona khas Parkinson
+    PARK_MAX = 12.0   # Hz
+
+    def __init__(self, fps: int = 30):
+        self.fps = fps
+        self.nyquist = fps / 2.0
+
+    def analyze(
+        self, y_series: np.ndarray
+    ) -> Tuple[Optional[float], Optional[float], float]:
+        """
+        Analisis FFT time-series koordinat y pergelangan tangan.
+        Returns: (dominant_freq_hz, tremor_amplitude, tremor_duration_pct)
+        None jika data tidak cukup.
+        """
+        N = len(y_series)
+        if N < self.fps * 2:  # Minimal 2 detik
+            return None, None, 0.0
+
+        # 1. Remove DC component
+        y_centered = y_series - np.mean(y_series)
+
+        # 2. Hanning window
+        window = np.hanning(N)
+        y_windowed = y_centered * window
+
+        # 3. FFT
+        Y = fft(y_windowed)
+        freqs = fftfreq(N, d=1.0 / self.fps)
+
+        # 4. Positive frequencies only
+        pos_mask = freqs > 0
+        freqs_pos = freqs[pos_mask]
+        power = np.abs(Y[pos_mask]) ** 2 / N
+
+        # 5. Filter dalam zona tremor
+        tremor_mask = (freqs_pos >= self.FREQ_MIN) & (freqs_pos <= self.FREQ_MAX)
+        f_tremor = freqs_pos[tremor_mask]
+        p_tremor = power[tremor_mask]
+
+        if len(f_tremor) == 0:
+            return None, None, 0.0
+
+        # 6. Frekuensi dominan dalam zona tremor
+        idx = np.argmax(p_tremor)
+        dominant_freq = float(f_tremor[idx])
+
+        # 7. Amplitudo (dari power spectrum)
+        amplitude = float(np.sqrt(2.0 * p_tremor[idx]))
+
+        # 8. Durasi relatif (% energi tremor / energi total)
+        total_energy = float(np.sum(power))
+        tremor_energy = float(np.sum(p_tremor))
+        pct = tremor_energy / total_energy if total_energy > 1e-10 else 0.0
+
+        return dominant_freq, amplitude, pct
+
+    def welch_psd(
+        self, y_series: np.ndarray, nperseg: int = 256
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Power Spectral Density via Welch's method. Lebih robust terhadap noise."""
+        n = min(nperseg, len(y_series))
+        if n < 8:
+            return np.array([]), np.array([])
+        freqs, psd = sig.welch(
+            y_series - np.mean(y_series),
+            fs=self.fps,
+            nperseg=n,
+            window="hann",
+        )
+        return freqs, psd
+</file>
+
+<file path="server/models/__init__.py">
+
+</file>
+
+<file path="server/models/database.py">
+"""
+Database — SQLite persistence untuk pasien, sesi, dan laporan.
+Thread-safe dengan WAL mode dan indexes.
+"""
+
+import json
+import sqlite3
+import threading
+from typing import Optional
+from config import DB_PATH
+
+
+class Database:
+    """SQLite database wrapper — thread-safe singleton."""
+
+    _instance: Optional["Database"] = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._init_db()
+        return cls._instance
+
+    def _init_db(self):
+        self._db_path = DB_PATH
+        self._conn = sqlite3.connect(
+            self._db_path,
+            check_same_thread=False,
+            timeout=10,
+        )
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._create_tables()
+
+    def _create_tables(self):
+        c = self._conn.cursor()
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS patients (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                age         INTEGER DEFAULT 0,
+                gender      TEXT DEFAULT '',
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id          TEXT PRIMARY KEY,
+                patient_id  TEXT NOT NULL,
+                instruction TEXT NOT NULL,
+                status      TEXT DEFAULT 'active',
+                started_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ended_at    TIMESTAMP,
+                FOREIGN KEY (patient_id) REFERENCES patients(id)
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS reports (
+                id          TEXT PRIMARY KEY,
+                session_id  TEXT UNIQUE,
+                report_json TEXT,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            )
+        """)
+
+        # Indexes for faster queries
+        c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_patient ON sessions(patient_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_reports_session ON reports(session_id)")
+
+        self._conn.commit()
+
+    def execute(self, query: str, params: tuple = ()):
+        with self._lock:
+            cursor = self._conn.execute(query, params)
+            self._conn.commit()
+            return cursor
+
+    def fetchone(self, query: str, params: tuple = ()):
+        with self._lock:
+            return self._conn.execute(query, params).fetchone()
+
+    def fetchall(self, query: str, params: tuple = ()):
+        with self._lock:
+            return self._conn.execute(query, params).fetchall()
+
+    def upsert_patient(self, patient_id: str, name: str, age: int = 0, gender: str = ""):
+        self.execute(
+            "INSERT OR IGNORE INTO patients (id, name, age, gender) VALUES (?, ?, ?, ?)",
+            (patient_id, name, age, gender),
+        )
+
+    def create_session(self, session_id: str, patient_id: str, instruction: str):
+        self.execute(
+            "INSERT INTO sessions (id, patient_id, instruction) VALUES (?, ?, ?)",
+            (session_id, patient_id, instruction),
+        )
+
+    def complete_session(self, session_id: str):
+        self.execute(
+            "UPDATE sessions SET status='completed', ended_at=CURRENT_TIMESTAMP WHERE id=?",
+            (session_id,),
+        )
+
+    def save_report(self, report_id: str, session_id: str, report_json: str):
+        self.execute(
+            "INSERT INTO reports (id, session_id, report_json) VALUES (?, ?, ?)",
+            (report_id, session_id, report_json),
+        )
+
+    def get_report(self, session_id: str):
+        return self.fetchone(
+            "SELECT report_json FROM reports WHERE session_id=?", (session_id,)
+        )
+
+    def get_patient_history(self, patient_id: str):
+        return self.fetchall(
+            """SELECT r.report_json, r.created_at
+               FROM reports r JOIN sessions s ON r.session_id = s.id
+               WHERE s.patient_id=? ORDER BY r.created_at DESC""",
+            (patient_id,),
+        )
+
+    def get_all_reports(self, limit: int = 50):
+        return self.fetchall(
+            """SELECT r.report_json, r.created_at, s.patient_id, s.instruction
+               FROM reports r JOIN sessions s ON r.session_id = s.id
+               ORDER BY r.created_at DESC LIMIT ?""",
+            (limit,),
+        )
+
+    def get_stats(self) -> dict:
+        total_patients = self.fetchone("SELECT COUNT(DISTINCT patient_id) FROM sessions")
+        total_sessions = self.fetchone("SELECT COUNT(*) FROM sessions")
+        completed = self.fetchone("SELECT COUNT(*) FROM sessions WHERE status='completed'")
+
+        all_reports = self.fetchall("SELECT report_json FROM reports")
+        referal = monitor = normal = 0
+        for (rj,) in all_reports:
+            try:
+                data = json.loads(rj)
+                risks = data.get("risk_levels", {})
+                if any(v == "referal" for v in risks.values()):
+                    referal += 1
+                elif any(v == "monitor" for v in risks.values()):
+                    monitor += 1
+                else:
+                    normal += 1
+            except (json.JSONDecodeError, AttributeError):
+                continue
+
+        return {
+            "total_patients": total_patients[0] if total_patients else 0,
+            "total_sessions": total_sessions[0] if total_sessions else 0,
+            "completed_sessions": completed[0] if completed else 0,
+            "risk_distribution": {"referal": referal, "monitor": monitor, "normal": normal},
+        }
+</file>
+
+<file path="server/models/schemas.py">
+"""
+Pydantic Schemas — Data models untuk WebSocket communication dan REST API.
+"""
+
+from pydantic import BaseModel, Field
+from typing import List, Optional
+from datetime import datetime
+from enum import Enum
+
+
+# ─── Enums ──────────────────────────────────────────────
+
+class RiskLevel(str, Enum):
+    NORMAL  = "normal"
+    MONITOR = "monitor"
+    REFERAL = "referal"
+
+
+class InstructionType(str, Enum):
+    RAISE_HANDS   = "raise_hands"
+    STAND_STILL   = "stand_still"
+    SIT_TO_STAND  = "sit_to_stand"
+
+
+# ─── Landmark ───────────────────────────────────────────
+
+class Landmark(BaseModel):
+    """Satu titik landmark MediaPipe 3D."""
+    id:  int   = Field(..., description="Indeks landmark MediaPipe (0-32)")
+    x:   float = Field(..., description="Koordinat X normalisasi")
+    y:   float = Field(..., description="Koordinat Y normalisasi")
+    z:   float = Field(..., description="Kedalaman relatif")
+    vis: float = Field(0.0, ge=0.0, le=1.0, description="Skor visibility [0-1]")
+
+
+# ─── WebSocket Messages ─────────────────────────────────
+
+class SessionStartMsg(BaseModel):
+    type:        str = "session_start"
+    patient_id:  str
+    instruction: InstructionType
+    metadata:    Optional[dict] = None
+
+
+class LandmarksMsg(BaseModel):
+    type:      str = "landmarks"
+    frame:     int
+    timestamp: float
+    landmarks: List[Landmark]
+
+
+class SessionEndMsg(BaseModel):
+    type:       str = "session_end"
+    session_id: str
+
+
+class HeartbeatMsg(BaseModel):
+    type: str = "heartbeat"
+
+
+# ─── Server → Client Messages ───────────────────────────
+
+class AckMsg(BaseModel):
+    type:       str = "ack"
+    session_id: str
+    status:     str = "recording"
+    server_time: float
+
+
+class KinematicMetrics(BaseModel):
+    """Metrik kinematika per frame — dikirim server ke client."""
+    type:               str = "metrics"
+    frame:              int
+    shoulder_angle_L:   Optional[float] = None
+    shoulder_angle_R:   Optional[float] = None
+    elbow_angle_L:      Optional[float] = None
+    elbow_angle_R:      Optional[float] = None
+    ASI:                Optional[float] = None
+    dominant_freq_hz:   Optional[float] = None
+    tremor_amplitude:   Optional[float] = None
+    sts_phase:          Optional[str]  = None
+    sts_duration:       Optional[float] = None
+    psd_freqs:          Optional[List[float]] = None
+    psd_power:          Optional[List[float]] = None
+    confidence:         Optional[float] = None
+    status:             str = "recording"
+
+
+class HeartbeatAck(BaseModel):
+    type:        str = "heartbeat"
+    server_time: float
+    latency_ms:  Optional[float] = None
+
+
+class WSErrorMessage(BaseModel):
+    type:    str = "error"
+    message: str
+
+
+# ─── Report ─────────────────────────────────────────────
+
+class ClinicalReport(BaseModel):
+    """Laporan klinis terintegrasi dari satu sesi assessment."""
+    session_id:           str
+    patient_id:           str
+    timestamp:            datetime
+    instruction:          str
+
+    # Asimetri
+    meanASI:              float = 0.0
+    maxASI:               float = 0.0
+    shoulder_angle_L_mean: float = 0.0
+    shoulder_angle_R_mean: float = 0.0
+    angle_asymmetry:      float = 0.0
+
+    # Tremor
+    dominant_freq:        Optional[float] = None
+    tremor_amplitude:     Optional[float] = None
+    tremor_duration_pct:  float = 0.0
+
+    # Sit-to-Stand
+    transition_duration:  Optional[float] = None
+    transition_velocity:  Optional[float] = None
+
+    # Klasifikasi
+    stroke_risk:    RiskLevel = RiskLevel.NORMAL
+    parkinson_risk: RiskLevel = RiskLevel.NORMAL
+    sarcopenia_risk: RiskLevel = RiskLevel.NORMAL
+
+    # AI Narrative
+    ai_narrative: Optional[str] = None
+</file>
+
+<file path="server/routers/__init__.py">
+
+</file>
+
+<file path="server/routers/api_routes.py">
+"""
+REST API Routes — Untuk akses laporan, riwayat, dan statistik.
+"""
+
+import json
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
+from models.database import Database
+
+router = APIRouter()
+db = Database()
+
+
+@router.get("/reports/{session_id}")
+async def get_report(session_id: str):
+    """Ambil laporan berdasarkan session ID."""
+    row = db.get_report(session_id)
+    if not row:
+        raise HTTPException(404, detail="Report not found")
+    return JSONResponse(content=json.loads(row[0]))
+
+
+@router.get("/patients/{patient_id}/history")
+async def get_patient_history(patient_id: str):
+    """Ambil riwayat assessment seorang pasien."""
+    rows = db.get_patient_history(patient_id)
+    reports = []
+    for rj, created_at in rows:
+        try:
+            data = json.loads(rj)
+            data["created_at"] = created_at
+            reports.append(data)
+        except json.JSONDecodeError:
+            continue
+    return {
+        "patient_id": patient_id,
+        "total_sessions": len(reports),
+        "reports": reports,
+    }
+
+
+@router.get("/reports")
+async def list_reports(limit: int = 50):
+    """List semua laporan terbaru."""
+    rows = db.get_all_reports(limit=limit)
+    reports = []
+    for rj, created_at, pid, instr in rows:
+        try:
+            data = json.loads(rj)
+            data["created_at"] = created_at
+            data["patient_id"] = pid
+            data["instruction"] = instr
+            reports.append(data)
+        except json.JSONDecodeError:
+            continue
+    return {"total": len(reports), "reports": reports}
+
+
+@router.get("/dashboard/stats")
+async def get_stats():
+    """Statistik ringkas untuk dashboard."""
+    return db.get_stats()
+</file>
+
+<file path="server/routers/health.py">
+"""
+Health Check endpoint — Status server, CPU, memory.
+"""
+
+import time
+try:
+    import psutil
+    _HAS_PSUTIL = True
+except ImportError:
+    _HAS_PSUTIL = False
+
+from fastapi import APIRouter
+
+router = APIRouter()
+_start_time = time.time()
+
+
+@router.get("/")
+async def health():
+    data = {
+        "status": "ok",
+        "service": "NeuroMotorik Screener",
+        "version": "1.0.0",
+        "uptime_seconds": round(time.time() - _start_time, 1),
+    }
+    if _HAS_PSUTIL:
+        data["cpu_percent"] = psutil.cpu_percent(interval=0.1)
+        data["memory_mb"] = round(psutil.Process().memory_info().rss / 1024 / 1024, 1)
+    return data
+</file>
+
+<file path="server/services/__init__.py">
+
+</file>
+
+<file path="server/config.py">
+"""
+Configuration — Pengaturan global untuk NeuroMotorik Screener Server.
+
+Catatan: Threshold klinis sekarang berada di core/clinical_thresholds.py
+         (evidence-based dari literatur medis).
+"""
+
+import os
+
+# ── Server ──────────────────────────────────────────────
+HOST = os.getenv("SERVER_HOST", "0.0.0.0")
+PORT = int(os.getenv("SERVER_PORT", "8765"))
+
+# ── Database ────────────────────────────────────────────
+DB_PATH = os.getenv("DB_PATH", "neuromotorik.db")
+
+# ── Pose Estimation ─────────────────────────────────────
+CONFIDENCE_THRESHOLD = 0.5    # Minimum landmark visibility
+ANALYSIS_FPS = 30             # Frame rate target
+FRAME_SKIP = 2                # Analisis setiap N frame
+</file>
+
+<file path="server/requirements.txt">
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+websockets>=12.0
+numpy>=1.24.0
+scipy>=1.11.0
+pydantic>=2.5.0
+psutil>=5.9.0
+</file>
+
+<file path="client/css/style.css">
+/* ═══════════════════════════════════════════════════════════════
+   NeuroMotorik Screener — Premium Medical-Tech Dark Theme
+   Glassmorphism · Gradient Accents · Smooth Animations
+   v2.0 — Evidence-Based Clinical Screening
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+    /* ── Color Palette (Light Healthcare Theme) ── */
+    --bg-base:      #f0fdf4; /* Light mint background */
+    --bg-surface:   #ffffff;
+    --bg-elevated:  #ffffff;
+    --bg-card:      rgba(255, 255, 255, 0.9);
+    --bg-glass:     rgba(255, 255, 255, 0.75);
+
+    --border:       rgba(16, 185, 129, 0.15); /* Soft green border */
+    --border-light: rgba(16, 185, 129, 0.08);
+
+    --text-primary:   #064e3b; /* Very dark green text */
+    --text-secondary: #334155;
+    --text-muted:     #64748b;
+
+    /* Override "blue" to actually be our primary Healthcare Green so we don't have to rewrite the whole CSS */
+    --blue:    #10b981; /* Emerald */
+    --blue-g:  linear-gradient(135deg, #10b981, #059669);
+    
+    --purple:  #8b5cf6;
+    --green:   #10b981; /* Default green */
+    --green-g: linear-gradient(135deg, #34d399, #10b981);
+    --yellow:  #f59e0b;
+    --yellow-g:linear-gradient(135deg, #fbbf24, #f59e0b);
+    --red:     #ef4444;
+    --red-g:   linear-gradient(135deg, #f87171, #ef4444);
+    --cyan:    #0ea5e9; /* Sky blue */
+
+    --radius-sm:  6px;
+    --radius:     12px;
+    --radius-lg:  20px;
+    --radius-xl:  24px;
+
+    --shadow: 0 4px 20px rgba(16, 185, 129, 0.08), 0 1px 4px rgba(0,0,0,0.04);
+    --shadow-glow: 0 0 30px rgba(16, 185, 129, 0.15);
+
+    --sidebar-width: 250px;
+    --statusbar-height: 40px;
+}
+
+/* ── Reset ── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { font-size: 14px; }
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    min-height: 100vh;
+    display: flex;
+    overflow: hidden;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(16, 185, 129, 0.2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(16, 185, 129, 0.4); }
+
+/* ═══ SIDEBAR ═══════════════════════════════════════════════ */
+.sidebar {
+    width: var(--sidebar-width);
+    height: 100vh;
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 50;
+}
+
+.sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 20px 20px;
+    border-bottom: 1px solid var(--border);
+}
+.brand-icon {
+    width: 40px; height: 40px;
+    background: var(--blue-g);
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    flex-shrink: 0;
+}
+.brand-name { font-weight: 700; font-size: 15px; display: block; }
+.brand-tag { font-size: 11px; color: var(--text-muted); }
+
+.sidebar-nav {
+    flex: 1;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .2s ease;
+    font-family: inherit;
+}
+.nav-item:hover { background: rgba(16, 185, 129, 0.08); color: var(--text-primary); }
+.nav-item.active {
+    background: rgba(16, 185, 129, 0.12);
+    color: var(--blue); /* We overrode --blue to be green */
+    box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.sidebar-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+}
+.connection-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.conn-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+    transition: background .3s;
+}
+.conn-dot.connected { background: var(--green); animation: pulse 2s infinite; }
+
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,.4); }
+    50% { box-shadow: 0 0 0 6px rgba(34,197,94,0); }
+}
+
+/* ═══ MAIN CONTENT ══════════════════════════════════════════ */
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.view {
+    flex: 1;
+    overflow-y: auto;
+    padding: 28px 32px;
+    display: none;
+    animation: fadeIn .3s ease;
+}
+.view.active { display: block; }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── View Header ── */
+.view-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 24px;
+}
+.view-header h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+.subtitle { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+.header-badge {
+    background: var(--red);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 20px;
+    letter-spacing: 1px;
+    animation: pulse 2s infinite;
+}
+
+/* ── Glass Card ── */
+.glass {
+    background: var(--bg-glass);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+}
+
+.card { border-radius: var(--radius-lg); padding: 24px; }
+.card-header { margin-bottom: 20px; }
+.card-header h2 { font-size: 16px; font-weight: 600; }
+
+/* ═══ STATS ROW ═════════════════════════════════════════════ */
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin-bottom: 24px;
+}
+@media (max-width: 1100px) { .stats-row { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 700px) { .stats-row { grid-template-columns: repeat(2, 1fr); } }
+
+.stat-card {
+    padding: 18px 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    transition: transform .2s, box-shadow .2s;
+}
+.stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-glow); }
+
+/* Evidence Info */
+.evidence-info { margin-top: 24px; }
+.evidence-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 12px; }
+.evidence-item { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border-radius: var(--radius); background: rgba(255,255,255,0.02); }
+.evidence-icon { font-size: 24px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.05); border-radius: 50%; }
+.evidence-content strong { display: block; font-size: 13px; color: var(--text-primary); margin-bottom: 2px; }
+.evidence-content p { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+
+/* Confidence indicator */
+.progress-confidence-row { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.confidence-indicator { display: flex; align-items: center; gap: 10px; }
+.confidence-label { font-size: 11px; color: var(--text-muted); min-width: 70px; }
+.confidence-track { flex: 1; height: 4px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden; }
+.confidence-fill { height: 100%; background: linear-gradient(90deg, var(--green), var(--blue)); width: 0%; transition: width .3s; }
+.confidence-value { font-size: 11px; color: var(--text-secondary); min-width: 35px; text-align: right; }
+
+/* ═══ FORMS ═════════════════════════════════════════════════ */
+    width: 42px; height: 42px;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.stat-icon.blue   { background: rgba(16,185,129,.15); color: var(--blue); }
+.stat-icon.purple { background: rgba(139,92,246,.15); color: var(--purple); }
+.stat-icon.green  { background: rgba(34,197,94,.15);  color: var(--green); }
+.stat-icon.yellow { background: rgba(234,179,8,.15);  color: var(--yellow); }
+.stat-icon.red    { background: rgba(239,68,68,.15);  color: var(--red); }
+
+.stat-info { display: flex; flex-direction: column; }
+.stat-value { font-size: 24px; font-weight: 700; line-height: 1.2; }
+.stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
+
+/* ═══ FORMS ═════════════════════════════════════════════════ */
+.form-grid {
+    display: flex;
+    gap: 16px;
+    align-items: end;
+    flex-wrap: wrap;
+}
+.form-group { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 160px; }
+.form-group label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+.form-group input, .form-group select {
+    background: var(--bg-base);
+    border: 1px solid var(--border-light);
+    color: var(--text-primary);
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color .2s;
+}
+.form-group input:focus, .form-group select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(16,185,129,.1); }
+.form-group input::placeholder { color: var(--text-muted); }
+.form-group input[type="number"] { -moz-appearance: textfield; }
+.form-group input[type="number"]::-webkit-inner-spin-button,
+.form-group input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+.form-actions { flex: 0 0 auto; min-width: auto; }
+
+/* ── Buttons ── */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all .2s ease;
+}
+.btn-primary { background: var(--blue-g); color: white; box-shadow: 0 2px 12px rgba(16,185,129,.3); }
+.btn-primary:hover { box-shadow: 0 4px 20px rgba(16,185,129,.5); transform: translateY(-1px); }
+.btn-danger { background: rgba(239,68,68,.15); color: var(--red); border: 1px solid rgba(239,68,68,.3); }
+.btn-danger:hover { background: rgba(239,68,68,.25); }
+.btn-lg { padding: 12px 28px; font-size: 14px; }
+.btn-sm { padding: 6px 14px; font-size: 12px; }
+
+/* ═══ EVIDENCE INFO ════════════════════════════════════════ */
+.evidence-info {
+    margin-top: 20px;
+}
+.evidence-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+}
+@media (max-width: 900px) { .evidence-grid { grid-template-columns: 1fr; } }
+
+.evidence-item {
+    display: flex;
+    gap: 12px;
+    padding: 14px;
+    background: var(--bg-surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    transition: border-color .2s, background .2s, box-shadow .2s;
+}
+.evidence-item:hover {
+    border-color: rgba(16, 185, 129, 0.3);
+    background: rgba(16, 185, 129, 0.03);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.05);
+}
+.evidence-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+}
+.stroke-icon { background: rgba(16,185,129,0.1); }
+.parkinson-icon { background: rgba(139,92,246,0.1); }
+.sarcopenia-icon { background: rgba(234,179,8,0.1); }
+
+.evidence-content strong {
+    font-size: 12px;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 4px;
+}
+.evidence-content p {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+/* ═══ ASSESSMENT ════════════════════════════════════════════ */
+.assess-controls { display: flex; align-items: center; gap: 12px; }
+.timer {
+    font-size: 22px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--blue);
+}
+.frame-badge {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--bg-base);
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+}
+
+.assessment-layout {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 20px;
+    height: calc(100vh - 160px);
+}
+@media (max-width: 1000px) { .assessment-layout { grid-template-columns: 1fr; height: auto; } }
+
+/* ── Video ── */
+.video-column { display: flex; flex-direction: column; gap: 10px; }
+.video-wrapper {
+    position: relative;
+    background: #000;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    flex: 1;
+    min-height: 300px;
+}
+.video-wrapper video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+}
+.video-wrapper canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    transform: scaleX(-1);
+}
+
+.status-overlay {
+    position: absolute;
+    top: 12px; left: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+.status-overlay.normal  { background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.25); }
+.status-overlay.warning { background: rgba(234,179,8,.15); color: var(--yellow); border: 1px solid rgba(234,179,8,.25); }
+.status-overlay.alert   { background: rgba(239,68,68,.15); color: var(--red); border: 1px solid rgba(239,68,68,.25); }
+
+.pulse-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: pulse 1.5s infinite;
+}
+
+.pose-guide {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 16px;
+    background: linear-gradient(transparent, rgba(0,0,0,.7));
+    text-align: center;
+}
+.pose-guide.hidden { display: none; }
+.guide-text { font-size: 14px; color: rgba(255,255,255,.85); }
+
+/* ── Confidence + Progress Row ── */
+.progress-confidence-row {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
+.confidence-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+.confidence-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 600;
+    white-space: nowrap;
+}
+.confidence-track {
+    width: 80px;
+    height: 6px;
+    background: var(--bg-elevated);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.confidence-fill {
+    height: 100%;
+    background: linear-gradient(135deg, var(--cyan), var(--green));
+    width: 0%;
+    transition: width .5s ease;
+    border-radius: 3px;
+}
+.confidence-value {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--cyan);
+    min-width: 30px;
+    text-align: right;
+}
+
+.progress-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+}
+.progress-track {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-elevated);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%;
+    background: var(--blue-g);
+    width: 0%;
+    transition: width .3s ease;
+    border-radius: 3px;
+}
+.progress-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 36px;
+    text-align: right;
+}
+
+/* ── Metrics Column ── */
+.metrics-column {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    max-height: calc(100vh - 160px);
+    padding-right: 4px;
+}
+
+.metric-card { padding: 16px; }
+.mc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.mc-header h3 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: var(--text-muted);
+}
+.mc-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+.mc-badge.normal  { background: rgba(34,197,94,.15); color: var(--green); }
+.mc-badge.warning { background: rgba(234,179,8,.15); color: var(--yellow); }
+.mc-badge.alert   { background: rgba(239,68,68,.15); color: var(--red); }
+
+.mc-big-value {
+    font-size: 42px;
+    font-weight: 800;
+    text-align: center;
+    line-height: 1.1;
+    margin: 4px 0 10px;
+    background: var(--blue-g);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.threshold-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; }
+.tb-segment.green  { background: var(--green); }
+.tb-segment.yellow { background: var(--yellow); }
+.tb-segment.red    { background: var(--red); }
+.tb-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 3px;
+}
+
+.mc-detail {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+}
+.mc-detail strong { color: var(--text-primary); }
+
+/* ── Phase Track ── */
+.phase-track {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    margin: 8px 0;
+}
+.phase-dot {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    transition: all .3s;
+}
+.phase-dot.active {
+    background: var(--blue);
+    border-color: var(--blue);
+    color: white;
+    box-shadow: 0 0 12px rgba(16,185,129,.4);
+}
+.phase-line {
+    width: 24px;
+    height: 2px;
+    background: var(--border-light);
+}
+
+/* ═══ REPORTS ═══════════════════════════════════════════════ */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+    gap: 16px;
+}
+
+.report-result {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.risk-card {
+    padding: 20px;
+    text-align: center;
+    transition: transform .2s, box-shadow .2s;
+}
+.risk-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-glow);
+}
+.risk-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    margin-bottom: 4px;
+}
+.risk-value {
+    font-size: 28px;
+    font-weight: 800;
+}
+.risk-value.normal  { color: var(--green); }
+.risk-value.monitor { color: var(--yellow); }
+.risk-value.referal { color: var(--red); }
+.risk-sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
+.report-risks {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+@media (max-width: 700px) { .report-risks { grid-template-columns: 1fr; } }
+
+.report-narrative {
+    padding: 20px;
+    background: var(--bg-base);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+}
+.report-narrative pre {
+    white-space: pre-wrap;
+    font-family: 'Inter', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-secondary);
+}
+
+/* ═══ STATUS BAR ════════════════════════════════════════════ */
+.statusbar {
+    height: var(--statusbar-height);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+.sb-left, .sb-center, .sb-right { display: flex; align-items: center; gap: 8px; }
+.sb-item { display: flex; align-items: center; gap: 4px; }
+.sb-divider { width: 1px; height: 12px; background: var(--border); }
+
+.dot { width: 6px; height: 6px; border-radius: 50%; }
+.dot-green { background: var(--green); }
+.dot-red   { background: var(--red); }
+
+/* ═══ UTILITIES ═════════════════════════════════════════════ */
+.hidden { display: none !important; }
+
+/* ═══ SEQUENTIAL STEPPER ═══════════════════════════════════ */
+.seq-indicator {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 16px;
+}
+.seq-step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    transition: all .3s;
+}
+.seq-step.active {
+    background: var(--blue);
+    border-color: var(--blue);
+    color: white;
+    box-shadow: 0 0 12px rgba(59,130,246,.3);
+}
+.seq-step.done {
+    background: var(--green);
+    border-color: var(--green);
+    color: white;
+}
+.seq-num {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 11px;
+    background: rgba(255,255,255,.2);
+}
+.seq-step.active .seq-num { background: rgba(255,255,255,.3); }
+.seq-arrow { color: var(--text-muted); font-size: 14px; }
+.seq-progress { font-size: 12px; color: var(--text-muted); margin-left: 8px; font-weight: 600; }
+
+/* ═══ PDF BUTTON ═══════════════════════════════════════════ */
+.btn-sm { padding: 6px 14px; font-size: 12px; }
+
+/* ═══ ANIMATIONS ════════════════════════════════════════════ */
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.stat-card { animation: slideUp .4s ease backwards; }
+.stat-card:nth-child(1) { animation-delay: .05s; }
+.stat-card:nth-child(2) { animation-delay: .1s; }
+.stat-card:nth-child(3) { animation-delay: .15s; }
+.stat-card:nth-child(4) { animation-delay: .2s; }
+.stat-card:nth-child(5) { animation-delay: .25s; }
+
+.metric-card { animation: slideUp .3s ease backwards; }
+.metric-card:nth-child(1) { animation-delay: .05s; }
+.metric-card:nth-child(2) { animation-delay: .1s; }
+.metric-card:nth-child(3) { animation-delay: .15s; }
+.metric-card:nth-child(4) { animation-delay: .2s; }
+
+/* ═══ RESPONSIVE POLISH ════════════════════════════════════ */
+@media (max-width: 768px) {
+    .sidebar { width: 60px; }
+    .sidebar-brand .brand-text { display: none; }
+    .nav-item span { display: none; }
+    .nav-item { justify-content: center; padding: 10px; }
+    .sidebar-footer { padding: 10px; }
+    .conn-text { display: none; }
+    .view { padding: 16px; }
+    .form-grid { flex-direction: column; }
+    .evidence-grid { grid-template-columns: 1fr; }
+}
+</file>
+
+<file path="client/js/websocket-client.js">
+/**
+ * WSClient — WebSocket connection manager with auto-reconnect.
+ *
+ * Perbaikan:
+ *   1. Dynamic URL menggunakan window.location.host
+ *   2. Support untuk age parameter di session_start
+ *   3. Better reconnection with jitter
+ */
+
+class WSClient {
+    constructor(url) {
+        // Hardcode port 8765 karena backend Python berjalan di port ini (terpisah dari web server Vite/Live Server)
+        this.url = url || `ws://127.0.0.1:8765/ws/stream`;
+
+        this.ws = null;
+        this.connected = false;
+        this.reconnectAttempts = 0;
+        this.maxReconnect = 20;
+        this.pingTimer = null;
+        this.lastPing = 0;
+        this.latency = 0;
+        this.onMetrics = null;
+        this.onReport = null;
+        this.onAck = null;
+        this.onError = null;
+        this.onStatusChange = null;
+    }
+
+    connect() {
+        try {
+            this.ws = new WebSocket(this.url);
+        } catch (e) {
+            console.error("[WS] Failed:", e);
+            this._scheduleReconnect();
+            return;
+        }
+
+        this.ws.onopen = () => {
+            this.connected = true;
+            this.reconnectAttempts = 0;
+            this._startHeartbeat();
+            console.log("[WS] Connected to", this.url);
+            if (this.onStatusChange) this.onStatusChange("connected");
+        };
+
+        this.ws.onmessage = (e) => {
+            try { this._route(JSON.parse(e.data)); }
+            catch (err) { console.error("[WS] Parse error:", err); }
+        };
+
+        this.ws.onclose = (e) => {
+            this.connected = false;
+            this._stopHeartbeat();
+            if (this.onStatusChange) this.onStatusChange("disconnected");
+            this._scheduleReconnect();
+        };
+
+        this.ws.onerror = () => {};
+    }
+
+    _route(data) {
+        switch (data.type) {
+            case "metrics":           if (this.onMetrics) this.onMetrics(data); break;
+            case "report":            if (this.onReport)  this.onReport(data.report); break;
+            case "step_report":       if (this.onReport)  this.onReport(data.report); break;
+            case "sequential_report": if (this.onReport)  this.onReport(data.aggregated); break;
+            case "sequential_ack":    console.log("[WS] Sequential:", data); break;
+            case "ack":               if (this.onAck)     this.onAck(data); break;
+            case "alert":
+                console.warn("[WS] Alert:", data.alert_type, data.message);
+                if (this.onMetrics) this.onMetrics(data); // pass alert through metrics handler
+                break;
+            case "heartbeat":
+                this.latency = Math.round(performance.now() - this.lastPing);
+                break;
+            case "error":
+                console.warn("[WS] Server error:", data.message);
+                if (this.onError) this.onError(data.message);
+                break;
+        }
+    }
+
+    send(obj) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify(obj));
+        }
+    }
+
+    sendLandmarks(frame, timestamp, landmarks) {
+        this.send({ type: "landmarks", frame, timestamp, landmarks });
+    }
+
+    startSession(patientId, instruction, age) {
+        const msg = {
+            type: "session_start",
+            patient_id: patientId,
+            instruction: instruction,
+        };
+        // Include age if provided (for age-stratified sarcopenia thresholds)
+        if (age != null && age !== "" && !isNaN(parseInt(age))) {
+            msg.age = parseInt(age);
+        }
+        this.send(msg);
+    }
+
+    startSequential(patientId, age) {
+        const msg = {
+            type: "sequential_start",
+            patient_id: patientId,
+        };
+        if (age != null && age !== "" && !isNaN(parseInt(age))) {
+            msg.age = parseInt(age);
+        }
+        this.send(msg);
+    }
+
+    endSession(sessionId) {
+        this.send({ type: "session_end", session_id: sessionId });
+    }
+
+    getLatency() { return this.latency; }
+
+    _startHeartbeat() {
+        this.pingTimer = setInterval(() => {
+            this.lastPing = performance.now();
+            this.send({ type: "heartbeat" });
+        }, 3000);
+    }
+
+    _stopHeartbeat() {
+        clearInterval(this.pingTimer);
+    }
+
+    _scheduleReconnect() {
+        if (this.reconnectAttempts >= this.maxReconnect) return;
+        this.reconnectAttempts++;
+        // Exponential backoff with jitter
+        const base = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 20000);
+        const jitter = Math.random() * 500;
+        const delay = base + jitter;
+        console.log(`[WS] Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts})`);
+        setTimeout(() => this.connect(), delay);
+    }
+}
+</file>
+
+<file path="server/routers/tts_handler.py">
+import urllib.request
+import urllib.parse
+from fastapi import APIRouter, Response
+
+router = APIRouter()
+
+def chunk_text(text, max_len=150):
+    """Split text into chunks smaller than max_len without breaking words."""
+    words = text.split()
+    chunks = []
+    current_chunk = []
+    current_len = 0
+    for word in words:
+        if current_len + len(word) + 1 > max_len:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = [word]
+            current_len = len(word)
+        else:
+            current_chunk.append(word)
+            current_len += len(word) + 1
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+    return chunks
+
+@router.get("/tts")
+def get_tts(text: str):
+    """
+    Proxy Google Translate TTS to bypass browser OpaqueResponseBlocking (ORB) and CORS issues.
+    Chunks text to bypass Google's 200-character limit.
+    """
+    chunks = chunk_text(text, 150)
+    audio_data = b""
+    
+    try:
+        for chunk in chunks:
+            if not chunk.strip(): continue
+            url = f"https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=id&q={urllib.parse.quote(chunk)}"
+            req = urllib.request.Request(
+                url, 
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Referer': 'https://translate.google.com/'
+                }
+            )
+            with urllib.request.urlopen(req) as response:
+                audio_data += response.read()
+                
+        return Response(content=audio_data, media_type="audio/mpeg")
+    except Exception as e:
+        print(f"[TTS Error] {e}")
+        return Response(content="Audio failed", status_code=500)
+</file>
+
+<file path="server/routers/ws_handler.py">
+"""
+WebSocket Handler — Endpoint utama komunikasi real-time.
+
+Fitur baru:
+  1. Sequential Assessment: sequential_start → multiple session_start → sequential_end
+  2. Alert message: kirim alert saat threshold tercapai
+  3. PSD server-side: hitung dan kirim PSD chart data ke client
+  4. Confidence score per frame
+"""
+
+import json
+import time
+import traceback
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+from core.kinematic_engine import KinematicEngine
+from core.session_manager import SessionManager
+from models.schemas import Landmark
+
+router = APIRouter()
+session_mgr = SessionManager()
+
+
+@router.websocket("/stream")
+async def ws_stream(ws: WebSocket):
+    """WebSocket endpoint utama streaming landmark dan metrik."""
+    await ws.accept()
+    engine = None
+    session_id = None
+    patient_id = ""
+    patient_age = None
+    is_sequential = False
+    sequential_reports = []
+    instruction = "raise_hands"
+
+    # ── Sequential Assessment: START ──
+    if False:
+        pass  # placeholder for sequential block below
+
+    def _send(msg_dict):
+        try:
+            import asyncio
+            asyncio.create_task(ws.send_text(json.dumps(msg_dict)))
+        except Exception:
+            pass
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                await _send_error(ws, "Invalid JSON")
+                continue
+
+            msg_type = msg.get("type", "")
+
+            # ══ SEQUENTIAL START (3-in-1) ══
+            if msg_type == "sequential_start":
+                try:
+                    patient_id = msg.get("patient_id", f"PT-{int(time.time())}")
+                    patient_age = msg.get("age")
+                    if patient_age:
+                        try: patient_age = int(patient_age)
+                        except: patient_age = None
+                    is_sequential = True
+                    sequential_reports = []
+
+                    await ws.send_text(json.dumps({
+                        "type": "sequential_ack",
+                        "status": "ready",
+                        "sequence": [
+                            {"step": 1, "instruction": "raise_hands",   "label": "Angkat Tangan",   "duration": 15},
+                            {"step": 2, "instruction": "stand_still",   "label": "Berdiri Diam",    "duration": 20},
+                            {"step": 3, "instruction": "sit_to_stand",  "label": "Duduk ke Berdiri", "duration": 15},
+                        ],
+                        "server_time": time.time(),
+                    }))
+                except Exception as e:
+                    await _send_error(ws, str(e))
+
+            # ══ SESSION START (bisa normal atau sequential) ══
+            elif msg_type == "session_start":
+                try:
+                    patient_id = msg.get("patient_id", f"PT-{int(time.time())}")
+                    instruction = msg.get("instruction", "raise_hands")
+                    patient_age = msg.get("age")
+                    if patient_age:
+                        try: patient_age = int(patient_age)
+                        except: patient_age = None
+
+                    session_id = session_mgr.create(patient_id, instruction, age=patient_age)
+                    engine = KinematicEngine(instruction=instruction, patient_age=patient_age)
+
+                    await ws.send_text(json.dumps({
+                        "type": "ack",
+                        "session_id": session_id,
+                        "status": "recording",
+                        "instruction": instruction,
+                        "server_time": time.time(),
+                    }))
+                except Exception as e:
+                    await _send_error(ws, str(e))
+
+            # ══ LANDMARKS ══
+            elif msg_type == "landmarks":
+                if engine is None:
+                    continue
+
+                try:
+                    frame = msg.get("frame", 0)
+                    timestamp = msg.get("timestamp", time.time())
+                    raw_lms = msg.get("landmarks", [])
+
+                    landmarks = []
+                    for lm in raw_lms:
+                        try:
+                            landmarks.append(Landmark(
+                                id=int(lm.get("id", 0)),
+                                x=float(lm.get("x", 0)),
+                                y=float(lm.get("y", 0)),
+                                z=float(lm.get("z", 0)),
+                                vis=float(lm.get("vis", lm.get("visibility", 0))),
+                            ))
+                        except (ValueError, TypeError):
+                            continue
+
+                    if len(landmarks) < 10:
+                        continue
+
+                    metrics = engine.process_frame(frame, timestamp, landmarks)
+
+                    # Tentukan apakah perlu kirim alert
+                    alert_type = None
+                    if metrics.ASI is not None and metrics.ASI > 0.15:
+                        alert_type = "stroke_alert"
+                    elif metrics.ASI is not None and metrics.ASI > 0.08:
+                        alert_type = "stroke_warning"
+
+                    # Kirim metrik
+                    metrics_dict = metrics.model_dump()
+                    if alert_type:
+                        metrics_dict["alert"] = alert_type
+                        # Kirim sebagai message terpisah agar UI bisa flash
+                        await ws.send_text(json.dumps({
+                            "type": "alert",
+                            "alert_type": alert_type,
+                            "value": metrics.ASI,
+                            "message": "Asimetri terdeteksi!" if alert_type == "stroke_alert" else "Asimetri ringan",
+                            "server_time": time.time(),
+                        }))
+
+                    await ws.send_text(json.dumps(metrics_dict))
+
+                except Exception as e:
+                    print(f"[WS] Frame error: {e}")
+
+            # ══ SESSION END ══
+            elif msg_type == "session_end":
+                if engine is None:
+                    continue
+
+                try:
+                    report = engine.finalize(patient_id=patient_id)
+                    formatted = session_mgr.save_report(report, session_id)
+
+                    if is_sequential:
+                        sequential_reports.append(formatted)
+                        await ws.send_text(json.dumps({
+                            "type": "step_report",
+                            "instruction": instruction,
+                            "report": formatted,
+                            "step": len(sequential_reports),
+                        }))
+                        # Reset engine untuk step berikutnya
+                        engine = None
+                        session_id = None
+                    else:
+                        await ws.send_text(json.dumps({
+                            "type": "report",
+                            "report": formatted,
+                        }))
+                        engine = None
+                        session_id = None
+
+                except Exception as e:
+                    await _send_error(ws, str(e))
+
+            # ══ SEQUENTIAL END ══
+            elif msg_type == "sequential_end":
+                if is_sequential and sequential_reports:
+                    # Agregasi semua step report
+                    aggregated = _aggregate_sequential_reports(sequential_reports, patient_id)
+                    await ws.send_text(json.dumps({
+                        "type": "sequential_report",
+                        "reports": sequential_reports,
+                        "aggregated": aggregated,
+                    }))
+                else:
+                    await ws.send_text(json.dumps({
+                        "type": "sequential_report",
+                        "reports": [],
+                        "aggregated": {},
+                    }))
+                is_sequential = False
+                sequential_reports = []
+
+            # ══ HEARTBEAT ══
+            elif msg_type == "heartbeat":
+                await ws.send_text(json.dumps({
+                    "type": "heartbeat",
+                    "server_time": time.time(),
+                }))
+
+    except WebSocketDisconnect:
+        print(f"[WS] Disconnected: session={session_id}")
+    except Exception as e:
+        print(f"[WS] Error: {e}")
+
+
+def _aggregate_sequential_reports(reports: list, patient_id: str) -> dict:
+    """Aggregasi laporan dari 3 step assessment."""
+    import uuid
+    from datetime import datetime
+    from services.report_generator import ReportGenerator
+
+    stroke_risks = [r.get("risk_levels", {}).get("stroke", "normal") for r in reports]
+    park_risks = [r.get("risk_levels", {}).get("parkinson", "normal") for r in reports]
+    sarc_risks = [r.get("risk_levels", {}).get("sarcopenia", "normal") for r in reports]
+
+    def worst(risk_list):
+        if "referal" in risk_list: return "referal"
+        if "monitor" in risk_list: return "monitor"
+        return "normal"
+
+    # Confidence score overall (0-100)
+    confidences = [r.get("confidence_scores", {}) for r in reports]
+    stroke_c = max([c.get("stroke", 0) for c in confidences], default=0)
+    park_c = max([c.get("parkinson", 0) for c in confidences], default=0)
+    sarc_c = max([c.get("sarcopenia", 0) for c in confidences], default=0)
+    overall_conf = (stroke_c + park_c + sarc_c) / 3 * 100
+
+    timestamp = datetime.now().isoformat()
+
+    recommendation = ""
+    if worst(stroke_risks) == "referal":
+        recommendation = "REKOMENDASI: Rujukan neurologist — indikasi stroke ringan / TIA."
+    elif worst(park_risks) == "referal":
+        recommendation = "REKOMENDASI: Rujukan neurologist — indikasi tremor patologis (Parkinson)."
+    elif worst(sarc_risks) == "referal":
+        recommendation = "REKOMENDASI: Rujukan geriatri — indikasi sarcopenia (penurunan massa otot)."
+    elif worst(stroke_risks) == "monitor" or worst(park_risks) == "monitor" or worst(sarc_risks) == "monitor":
+        recommendation = "REKOMENDASI: Monitoring lanjutan — beberapa parameter di batas atas normal."
+    else:
+        recommendation = "REKOMENDASI: Normal — tidak terdeteksi indikasi anomali signifikan."
+
+    return {
+        "report_id": str(uuid.uuid4()),
+        "patient_id": patient_id,
+        "timestamp": timestamp,
+        "instruction": "sequential_3in1",
+        "risk_levels": {
+            "stroke": worst(stroke_risks),
+            "parkinson": worst(park_risks),
+            "sarcopenia": worst(sarc_risks),
+        },
+        "confidence_scores": {
+            "stroke": round(stroke_c, 3),
+            "parkinson": round(park_c, 3),
+            "sarcopenia": round(sarc_c, 3),
+            "overall": round(overall_conf, 1),
+        },
+        "recommendation": recommendation,
+        "narrative": f"Laporan Skrining 3-in-1.\n\n" + "\n".join([
+            f"Step {i+1} ({r.get('instruction','')}) — Risiko: {r.get('risk_levels',{}).get('stroke', 'normal')}"
+            for i, r in enumerate(reports)
+        ]),
+        "step_count": len(reports),
+    }
+
+
+async def _send_error(ws: WebSocket, message: str):
+    try:
+        await ws.send_text(json.dumps({"type": "error", "message": message}))
+    except Exception:
+        pass
+</file>
+
+<file path="server/services/report_generator.py">
+"""
+Report Generator — Merangkum metrik sesi menjadi laporan klinis terstruktur.
+"""
+
+import json
+from models.schemas import ClinicalReport, RiskLevel
+
+
+class ReportGenerator:
+
+    @staticmethod
+    def to_dict(report: ClinicalReport) -> dict:
+        # Compute confidence scores (0-1 scale)
+        stroke_conf = min(1.0, report.meanASI / 0.15) if report.meanASI > 0 else 0.0
+        parkinson_conf = 0.0
+        if report.dominant_freq and 3.0 <= report.dominant_freq <= 15.0:
+            if report.dominant_freq >= 4.0 and report.dominant_freq <= 12.0:
+                parkinson_conf = 0.7 + (report.tremor_duration_pct or 0) * 0.3
+            else:
+                parkinson_conf = 0.3 + (report.tremor_duration_pct or 0) * 0.3
+        sarcopenia_conf = 0.0
+        if report.transition_duration:
+            sarcopenia_conf = min(1.0, report.transition_duration / 7.0)
+
+        return {
+            "report_id": report.session_id,
+            "patient_id": report.patient_id,
+            "timestamp": report.timestamp.isoformat(),
+            "instruction": report.instruction,
+            "metrics": {
+                "asymmetry": {
+                    "meanASI": round(report.meanASI, 4),
+                    "maxASI": round(report.maxASI, 4),
+                    "shoulder_angle_L": round(report.shoulder_angle_L_mean, 1),
+                    "shoulder_angle_R": round(report.shoulder_angle_R_mean, 1),
+                    "angle_asymmetry": round(report.angle_asymmetry, 1),
+                },
+                "tremor": {
+                    "dominant_freq_hz": round(report.dominant_freq, 2) if report.dominant_freq else None,
+                    "amplitude": round(report.tremor_amplitude, 6) if report.tremor_amplitude else None,
+                    "duration_pct": round((report.tremor_duration_pct or 0) * 100, 1),
+                },
+                "sit_to_stand": {
+                    "duration_s": round(report.transition_duration, 2) if report.transition_duration else None,
+                    "velocity": round(report.transition_velocity, 4) if report.transition_velocity else None,
+                },
+            },
+            "risk_levels": {
+                "stroke": report.stroke_risk.value,
+                "parkinson": report.parkinson_risk.value,
+                "sarcopenia": report.sarcopenia_risk.value,
+            },
+            "confidence_scores": {
+                "stroke": round(stroke_conf, 3),
+                "parkinson": round(parkinson_conf, 3),
+                "sarcopenia": round(sarcopenia_conf, 3),
+            },
+            "recommendation": ReportGenerator._recommendation(report),
+            "narrative": ReportGenerator._narrative(report),
+        }
+
+    @staticmethod
+    def _recommendation(r: ClinicalReport) -> str:
+        if any(x == RiskLevel.REFERAL for x in [r.stroke_risk, r.parkinson_risk, r.sarcopenia_risk]):
+            return "REKOMENDASI: Rujukan klinis — segera konsultasikan dengan dokter spesialis."
+        if any(x == RiskLevel.MONITOR for x in [r.stroke_risk, r.parkinson_risk, r.sarcopenia_risk]):
+            return "REKOMENDASI: Monitoring — assessment ulang dalam 1-3 bulan."
+        return "REKOMENDASI: Normal — tidak terdeteksi indikasi anomali signifikan."
+
+    @staticmethod
+    def _narrative(r: ClinicalReport) -> str:
+        lines = []
+        lines.append(f"Laporan Screening Neuro-Motorik — {r.timestamp.strftime('%d %B %Y, %H:%M')}")
+
+        # Stroke
+        lines.append(f"\n[Asimetri] ASI: {r.meanASI:.3f} | Sudut L: {r.shoulder_angle_L_mean:.1f}° | R: {r.shoulder_angle_R_mean:.1f}°")
+        if r.stroke_risk == RiskLevel.REFERAL:
+            lines.append(f"  → Indikasi asimetri signifikan. Rujukan neurologis direkomendasikan.")
+        elif r.stroke_risk == RiskLevel.MONITOR:
+            lines.append(f"  → Asimetri ringan. Monitoring berkala direkomendasikan.")
+        else:
+            lines.append(f"  → Simetri dalam batas normal.")
+
+        # Parkinson
+        if r.dominant_freq:
+            lines.append(f"\n[Tremor] Freq: {r.dominant_freq:.1f} Hz | Amplitudo: {r.tremor_amplitude:.4f} | Durasi: {r.tremor_duration_pct*100:.0f}%")
+            if r.parkinson_risk == RiskLevel.REFERAL:
+                lines.append(f"  → Pola tremor patologis terdeteksi. Evaluasi neurologis direkomendasikan.")
+            elif r.parkinson_risk == RiskLevel.MONITOR:
+                lines.append(f"  → Aktivitas frekuensi transisi. Monitoring direkomendasikan.")
+            else:
+                lines.append(f"  → Tidak terdeteksi tremor patologis.")
+
+        # Sarcopenia
+        if r.transition_duration:
+            lines.append(f"\n[Sit-to-Stand] Durasi: {r.transition_duration:.2f}s")
+            if r.sarcopenia_risk == RiskLevel.REFERAL:
+                lines.append(f"  → Transisi lambat. Evaluasi komposisi tubuh direkomendasikan.")
+            elif r.sarcopenia_risk == RiskLevel.MONITOR:
+                lines.append(f"  → Durasi di batas atas normal.")
+            else:
+                lines.append(f"  → Transisi dalam batas normal.")
+
+        return "\n".join(lines)
+</file>
+
+<file path="server/main.py">
+"""
+NeuroMotorik Screener — FastAPI Application Entry Point.
+Server lokal untuk skrining multi-anomali neuro-motorik.
+"""
+
+import os
+import sys
+import time
+import signal
+import uvicorn
+from pathlib import Path
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+
+from routers.ws_handler import router as ws_router
+from routers.api_routes import router as api_router
+from routers.health import router as health_router
+from routers.tts_handler import router as tts_router
+from config import HOST, PORT
+
+# ── Path Setup ───────────────────────────────────────────
+SERVER_DIR = Path(__file__).parent.resolve()
+CLIENT_DIR = SERVER_DIR.parent / "client"
+
+
+# ── Lifespan (startup/shutdown) ──────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup & shutdown events."""
+    print()
+    print("  +----------------------------------------------------+")
+    print("  |   NeuroMotorik Screener Server v1.0                 |")
+    print(f"  |   Listening on: http://{HOST}:{PORT}                  |")
+    print(f"  |   Dashboard:    http://localhost:{PORT}               |")
+    print("  |   Status:       [OK] Started                        |")
+    print("  +----------------------------------------------------+")
+    print()
+    yield
+    print("\n  [Server] Shutting down gracefully...")
+
+
+# ── FastAPI App ──────────────────────────────────────────
+app = FastAPI(
+    title="NeuroMotorik Screener API",
+    description="Server lokal skrining Stroke, Parkinson, Sarcopenia via webcam",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Routers
+app.include_router(health_router, prefix="/health", tags=["Health"])
+app.include_router(ws_router, prefix="/ws", tags=["WebSocket"])
+app.include_router(api_router, prefix="/api", tags=["API"])
+app.include_router(tts_router, prefix="/api", tags=["TTS"])
+
+# Static files (frontend) — harus diakhir
+if CLIENT_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(CLIENT_DIR), html=True), name="client")
+else:
+    print(f"  [WARN] Client directory not found: {CLIENT_DIR}")
+
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host=HOST,
+        port=PORT,
+        reload=False,
+        log_level="info",
+        access_log=False,
+    )
+</file>
+
+<file path=".gitignore">
+__pycache__/
+*.pyc
+.env
+node_modules/
+.DS_Store
+*.db*
+</file>
+
+<file path="README.md">
+# NeuroMotorik Screener v2
+
+![NeuroMotorik Screener](https://img.shields.io/badge/Status-Active-brightgreen)
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.104.0%2B-teal)
+![MediaPipe](https://img.shields.io/badge/MediaPipe-Pose-orange)
+
+**NeuroMotorik Screener** adalah aplikasi berbasis web yang memanfaatkan teknologi *Computer Vision* (AI) untuk melakukan skrining klinis dini terhadap gangguan neuro-motorik seperti **Stroke, Parkinson, dan Sarcopenia**.
+
+Aplikasi ini menggunakan **Google MediaPipe Pose** untuk melacak pergerakan sendi (kerangka) pasien secara *real-time* menggunakan webcam standar, lalu mengirimkan data metrik tersebut via **WebSocket** ke server **FastAPI** untuk dianalisis menggunakan *Kinematic Engine*.
+
+Fitur Utama:
+- **Asymmetry Index (ASI):** Mengukur asimetri pergerakan sisi kiri dan kanan tubuh (Deteksi Risiko Stroke).
+- **Power Spectral Density (PSD):** Menganalisis frekuensi tremor menggunakan Fast Fourier Transform (Deteksi Risiko Parkinson).
+- **Sit-to-Stand (STS) Analysis:** Mengukur kecepatan transisi berdiri dan duduk (Deteksi Risiko Sarcopenia).
+- **Clean Healthcare UI/UX:** Tema hijau medis (Emerald Green) yang profesional dan responsif.
+
+---
+
+## 🛠️ Persyaratan Sistem (Prerequisites)
+
+Sebelum menjalankan aplikasi, pastikan komputer Anda telah terinstal:
+1. **Python 3.9** atau lebih baru.
+2. **Node.js** (Opsional, jika ingin menggunakan Vite untuk *frontend live-server*).
+3. Webcam atau kamera yang terhubung ke PC/Laptop.
+
+---
+
+## 🚀 Cara Menjalankan Aplikasi
+
+Aplikasi ini terdiri dari dua bagian: **Backend (Server)** dan **Frontend (Client)**. Anda harus menjalankan keduanya secara bersamaan.
+
+### 1. Menjalankan Backend (Server FastAPI)
+
+Buka terminal/command prompt, lalu masuk ke folder proyek:
+
+```bash
+# 1. Masuk ke folder server
+cd server
+
+# 2. Buat Virtual Environment (Sangat direkomendasikan)
+python -m venv venv
+venv\Scripts\activate   # Untuk Windows
+# source venv/bin/activate  # Untuk Mac/Linux
+
+# 3. Install semua dependencies
+pip install -r requirements.txt
+
+# 4. Jalankan server
+python main.py
+```
+> Server backend akan berjalan di `http://0.0.0.0:8765` dan mendengarkan koneksi WebSocket di `/ws/stream`.
+
+### 2. Menjalankan Frontend (Client Web)
+
+Buka terminal **baru** (biarkan terminal server backend tetap jalan), lalu jalankan frontend:
+
+**Cara A: Menggunakan Vite (Sangat disarankan untuk performa terbaik)**
+```bash
+# 1. Masuk ke folder client
+cd client
+
+# 2. Jalankan Vite server (bisa menggunakan npx)
+npx vite
+```
+> Buka browser dan akses URL yang diberikan Vite (biasanya `http://localhost:5173/index.html`).
+
+**Cara B: Menggunakan Python HTTP Server (Alternatif)**
+```bash
+# 1. Masuk ke folder client
+cd client
+
+# 2. Jalankan web server bawaan Python
+python -m http.server 8000
+```
+> Buka browser dan akses `http://localhost:8000/index.html`.
+
+---
+
+## 💡 Cara Penggunaan Assessment
+
+1. Buka halaman aplikasi di browser.
+2. Masukkan **ID Pasien/Nama** dan **Usia** di kolom yang tersedia.
+3. Pilih jenis instruksi/tes (Misal: *Angkat Kedua Tangan*).
+4. Klik **Mulai Assessment**.
+5. Izinkan akses kamera pada browser. Tunggu 2-3 detik hingga AI Model (MediaPipe) selesai dimuat.
+6. Berdirilah di depan kamera hingga garis kerangka (*skeleton*) berwarna hijau muncul di layar.
+7. Lakukan gerakan sesuai instruksi. Grafik ASI dan PSD akan bergerak secara real-time.
+8. Setelah 60 detik (atau jika Anda klik **Hentikan**), sistem akan memproses data dan menampilkan **Laporan Analisis Klinis** lengkap dengan kesimpulan risikonya.
+
+---
+
+## 📂 Struktur Direktori
+
+```text
+NEUTROMOTORIK/
+├── client/                     # Frontend (HTML, CSS, JS)
+│   ├── css/style.css           # Tema UI (Healthcare Green)
+│   ├── js/
+│   │   ├── main.js             # Logika utama (Kamera & UI)
+│   │   ├── skeleton-renderer.js# Modul penggambaran kerangka AI
+│   │   ├── chart-manager.js    # Modul grafik real-time (Chart.js)
+│   │   └── websocket-client.js # Modul komunikasi dengan server
+│   └── index.html              # Halaman utama aplikasi
+│
+├── server/                     # Backend (Python FastAPI)
+│   ├── core/                   # Logika AI & Kalkulasi Klinis (ASI, STS, Tremor)
+│   ├── routers/                # Endpoint API dan WebSocket Handler
+│   ├── main.py                 # Titik masuk (Entry point) server
+│   └── requirements.txt        # Daftar library Python
+│
+└── .gitignore                  # Pengecualian file untuk Git
+```
+
+---
+
+## 👨‍💻 Kontributor
+</file>
+
+<file path="server/core/kinematic_engine.py">
+"""
+KinematicEngine — Mesin komputasi utama per-sesi.
+Menerima stream landmark, menghasilkan metrik kinematika real-time.
+
+Perbaikan:
+  - ASI: match angle_L dan angle_R per-frame (bukan terakhir saja)
+  - PSD: Hitung Welch PSD secara incremental setiap N frame
+  - Thresholds: gunakan clinical_thresholds + risk_classifier
+  - Confidence: track kualitas data per frame
+"""
+
+import uuid
+import numpy as np
+from datetime import datetime
+from typing import List, Optional, Tuple
+
+from models.schemas import (
+    Landmark, KinematicMetrics, ClinicalReport, RiskLevel
+)
+from core.angle_calculator import AngleCalculator
+from core.tremor_analyzer import TremorAnalyzer
+from core import asymmetry_index as asi_mod
+from core.sit_to_stand import SitToStandDetector
+from core.clinical_thresholds import STROKE, PARKINSON, CONFIDENCE
+from core.risk_classifier import RiskClassifier
+
+# ── MediaPipe landmark indices ───────────────────────────
+L_SHOULDER, R_SHOULDER = 11, 12
+L_ELBOW,    R_ELBOW    = 13, 14
+L_WRIST,    R_WRIST    = 15, 16
+L_HIP,      R_HIP      = 23, 24
+L_KNEE,     R_KNEE     = 25, 26
+L_ANKLE,    R_ANKLE    = 27, 28
+
+
+class KinematicEngine:
+    """Engine komputasi kinematika per-sesi assessment."""
+
+    def __init__(self, instruction: str, fps: int = 30, patient_age: int | None = None):
+        self.instruction = instruction
+        self.fps = fps
+        self.patient_age = patient_age
+        self.frame_count = 0
+        self.created_at = datetime.now()
+
+        # Sub-modules
+        self.angle_calc = AngleCalculator()
+        self.tremor_analyzer = TremorAnalyzer(fps=fps)
+        self.sts_detector = SitToStandDetector(fps=fps)
+
+        # Time-series buffers (max 5000 frame = ~167 detik)
+        self._max_buffer = 5000
+        self.angle_L_buf: List[float] = []
+        self.angle_R_buf: List[float] = []
+        self.asi_buf:     List[float] = []
+        self.wrist_y_L:   List[float] = []
+        self.wrist_y_R:   List[float] = []
+        self.timestamps:  List[float] = []
+
+        # Compute age-stratified STS threshold
+        self._sts_warn = self._get_sts_threshold()
+        
+        # Initialize tracking variables
+        self._init_tracking_vars()
+
+    def _get_sts_threshold(self) -> float:
+        """Get age-stratified STS warning threshold (detik)."""
+        # Gunakan sistem clinical_thresholds baru
+        from core.clinical_thresholds import SARCOPENIA
+        th = SARCOPENIA.get_thresholds(self.patient_age)
+        return th.monitor_max_s
+
+    def _init_tracking_vars(self):
+        """Init all tracking variables separately to fix indentation issues."""
+        # Per-frame paired angles for accurate ASI
+        self._paired_angles: List[Tuple[float, float]] = []
+
+        # PSD cache — update setiap N frame
+        self._psd_interval = max(30, self.fps * 2)  # Setiap 2 detik
+        self._last_psd_frame = 0
+        self._cached_psd_freqs: Optional[List[float]] = None
+        self._cached_psd_power: Optional[List[float]] = None
+
+        # Confidence tracking
+        self._visibility_sum = 0.0
+        self._visibility_count = 0
+
+    def _to_dict(self, landmarks: List[Landmark]) -> dict:
+        """Konversi list landmarks ke dict {id: np.array[xyz]} dengan confidence filter."""
+        result = {}
+        for lm in landmarks:
+            if lm.vis >= CONFIDENCE.min_visibility:
+                result[lm.id] = np.array([lm.x, lm.y, lm.z])
+            # Track visibility for confidence scoring
+            self._visibility_sum += lm.vis
+            self._visibility_count += 1
+        return result
+
+    def _compute_angle(self, pts: dict, pivot_id: int, a_id: int, b_id: int) -> Optional[float]:
+        """Hitung sudut di pivot_id dengan titik a_id dan b_id. Return None jika landmark tidak ada."""
+        if all(i in pts for i in [pivot_id, a_id, b_id]):
+            return self.angle_calc.compute(pts[a_id], pts[pivot_id], pts[b_id])
+        return None
+
+    def _update_psd(self) -> Tuple[Optional[List[float]], Optional[List[float]]]:
+        """Compute Welch PSD jika ada cukup data. Return (freqs, power) atau (None, None)."""
+        wrist = (self.wrist_y_L if len(self.wrist_y_L) >= len(self.wrist_y_R)
+                 else self.wrist_y_R)
+
+        if len(wrist) < self.fps * 2:
+            return None, None
+
+        freqs, psd = self.tremor_analyzer.welch_psd(np.array(wrist))
+        if len(freqs) == 0:
+            return None, None
+
+        return freqs.tolist(), psd.tolist()
+
+    def _compute_frame_confidence(self) -> float:
+        """Compute current frame confidence level."""
+        if self._visibility_count == 0:
+            return 0.0
+        avg_vis = self._visibility_sum / self._visibility_count
+        frame_conf = min(1.0, self.frame_count / CONFIDENCE.high_confidence_frames)
+        vis_conf = min(1.0, avg_vis / CONFIDENCE.excellent_visibility)
+        return round((frame_conf * 0.4 + vis_conf * 0.6), 3)
+
+    def process_frame(
+        self, frame_id: int, timestamp: float, landmarks: List[Landmark]
+    ) -> KinematicMetrics:
+        """Proses satu frame landmark → hasilkan metrik kinematika."""
+        self.frame_count += 1
+        pts = self._to_dict(landmarks)
+        self.timestamps.append(timestamp)
+
+        m = KinematicMetrics(frame=frame_id)
+
+        # ── A. Shoulder angles (Hip → Shoulder → Elbow) ──
+        # Fallback: Jika pinggul tidak terlihat (sering terjadi jika duduk dekat kamera),
+        # buat titik pinggul virtual tepat di bawah bahu.
+        if L_HIP not in pts and L_SHOULDER in pts:
+            pts[L_HIP] = pts[L_SHOULDER] + np.array([0, 0.5, 0])
+        if R_HIP not in pts and R_SHOULDER in pts:
+            pts[R_HIP] = pts[R_SHOULDER] + np.array([0, 0.5, 0])
+
+        theta_L = self._compute_angle(pts, L_SHOULDER, L_HIP, L_ELBOW)
+        theta_R = self._compute_angle(pts, R_SHOULDER, R_HIP, R_ELBOW)
+
+        if theta_L is not None:
+            m.shoulder_angle_L = theta_L
+            self.angle_L_buf.append(theta_L)
+            if len(self.angle_L_buf) > self._max_buffer:
+                self.angle_L_buf.pop(0)
+
+        if theta_R is not None:
+            m.shoulder_angle_R = theta_R
+            self.angle_R_buf.append(theta_R)
+            if len(self.angle_R_buf) > self._max_buffer:
+                self.angle_R_buf.pop(0)
+
+        # ── B. Elbow angles (Shoulder → Elbow → Wrist) ──
+        phi_L = self._compute_angle(pts, L_ELBOW, L_SHOULDER, L_WRIST)
+        if phi_L is not None:
+            m.elbow_angle_L = phi_L
+
+        phi_R = self._compute_angle(pts, R_ELBOW, R_SHOULDER, R_WRIST)
+        if phi_R is not None:
+            m.elbow_angle_R = phi_R
+
+        # ── C. Asymmetry Index (per-frame paired matching) ──
+        if self.frame_count > 10:
+            asi = None
+            if theta_L is not None and theta_R is not None:
+                # Both angles available in same frame → accurate pair
+                asi = asi_mod.compute_from_angles(theta_L, theta_R)
+                self._paired_angles.append((theta_L, theta_R))
+                if len(self._paired_angles) > self._max_buffer:
+                    self._paired_angles.pop(0)
+            elif L_WRIST in pts and R_WRIST in pts:
+                # Fallback: position-based ASI
+                asi = asi_mod.compute_from_positions(pts[L_WRIST], pts[R_WRIST])
+
+            if asi is not None:
+                m.ASI = asi
+                self.asi_buf.append(asi)
+                if len(self.asi_buf) > self._max_buffer:
+                    self.asi_buf.pop(0)
+
+        # ── D. Wrist y-coordinates (untuk tremor analysis) ──
+        if L_WRIST in pts:
+            self.wrist_y_L.append(pts[L_WRIST][1])
+        if R_WRIST in pts:
+            self.wrist_y_R.append(pts[R_WRIST][1])
+
+        # ── E. Tremor — live dominant frequency ──
+        wrist = (self.wrist_y_L if len(self.wrist_y_L) >= len(self.wrist_y_R)
+                 else self.wrist_y_R)
+        if len(wrist) >= self.fps * 2:
+            df, ta, tp = self.tremor_analyzer.analyze(np.array(wrist))
+            if df is not None:
+                m.dominant_freq_hz = df
+                m.tremor_amplitude = ta
+
+        # ── F. PSD update (setiap N frame) ──
+        if self.frame_count - self._last_psd_frame >= self._psd_interval:
+            psd_freqs, psd_power = self._update_psd()
+            if psd_freqs is not None:
+                self._cached_psd_freqs = psd_freqs
+                self._cached_psd_power = psd_power
+                m.psd_freqs = psd_freqs
+                m.psd_power = psd_power
+            self._last_psd_frame = self.frame_count
+
+        # ── G. Sit-to-Stand detection ──
+        if self.instruction == "sit_to_stand":
+            if L_HIP in pts and R_HIP in pts:
+                mid_y = (pts[L_HIP][1] + pts[R_HIP][1]) / 2.0
+                phase, dur = self.sts_detector.update(mid_y)
+                m.sts_phase = phase
+                m.sts_duration = dur
+
+        # ── H. Confidence ──
+        m.confidence = self._compute_frame_confidence()
+
+        # ── I. Status determination ──
+        if m.ASI is not None and m.ASI > STROKE.asi_monitor_max:
+            m.status = "alert_asymmetry"
+        elif m.sts_duration is not None:
+            from core.clinical_thresholds import SARCOPENIA
+            group = SARCOPENIA.get_thresholds(self.patient_age)
+            if m.sts_duration > group.monitor_max_s:
+                m.status = "alert_slow"
+        else:
+            m.status = "recording"
+
+        return m
+
+    def finalize(self, patient_id: str = "") -> ClinicalReport:
+        """Finalisasi sesi: hitung FFT, rata-rata metrik, klasifikasi risiko."""
+
+        # ── 1. Tremor analysis (full session) ──
+        wrist = (self.wrist_y_L if len(self.wrist_y_L) >= len(self.wrist_y_R)
+                 else self.wrist_y_R)
+        dom_freq = tremor_amp = tremor_pct = None
+        if len(wrist) >= self.fps * 2:
+            df, ta, tp = self.tremor_analyzer.analyze(np.array(wrist))
+            dom_freq, tremor_amp, tremor_pct = df, ta, tp
+
+        # ── 2. Averages (using paired angles when available) ──
+        if self._paired_angles:
+            paired_L = [p[0] for p in self._paired_angles]
+            paired_R = [p[1] for p in self._paired_angles]
+            mean_aL = float(np.mean(paired_L))
+            mean_aR = float(np.mean(paired_R))
+        else:
+            mean_aL = float(np.mean(self.angle_L_buf)) if self.angle_L_buf else 0.0
+            mean_aR = float(np.mean(self.angle_R_buf)) if self.angle_R_buf else 0.0
+
+        mean_asi = float(np.mean(self.asi_buf)) if self.asi_buf else 0.0
+        max_asi = float(np.max(self.asi_buf)) if self.asi_buf else 0.0
+        angle_asym = abs(mean_aL - mean_aR)
+
+        # ── 3. Sit-to-Stand summary ──
+        sts_dur, sts_vel = self.sts_detector.get_summary()
+
+        # ── 4. Risk classification (dataset-trained) ──
+        stroke_risk, _, _ = RiskClassifier.classify_stroke(
+            mean_asi, angle_asym, self.frame_count
+        )
+        parkinson_risk, _, _ = RiskClassifier.classify_parkinson(
+            dom_freq, tremor_amp, tremor_pct or 0.0, self.frame_count
+        )
+        sarcopenia_risk, _, _ = RiskClassifier.classify_sarcopenia(
+            sts_dur, self.patient_age
+        )
+
+        return ClinicalReport(
+            session_id=str(uuid.uuid4()),
+            patient_id=patient_id,
+            timestamp=datetime.now(),
+            instruction=self.instruction,
+            meanASI=mean_asi,
+            maxASI=max_asi,
+            shoulder_angle_L_mean=mean_aL,
+            shoulder_angle_R_mean=mean_aR,
+            angle_asymmetry=angle_asym,
+            dominant_freq=dom_freq,
+            tremor_amplitude=tremor_amp,
+            tremor_duration_pct=tremor_pct or 0.0,
+            transition_duration=sts_dur,
+            transition_velocity=sts_vel,
+            stroke_risk=stroke_risk,
+            parkinson_risk=parkinson_risk,
+            sarcopenia_risk=sarcopenia_risk,
+        )
+</file>
+
+<file path="client/js/main.js">
+/**
+ * main.js — Complete Application Controller v3.0
+ * Features:
+ *   1. Sequential Assessment (3-in-1)
+ *   2. PDF Report Export (jsPDF + html2canvas)
+ *   3. Alert Notification System (Notification API + audio beep)
+ */
+
+// ═══ Global State ═══════════════════════════════════════════
+const app = {
+    ws: null, skeleton: null, charts: null, camera: null,
+    mediaStream: null, pose: null,
+    isRecording: false, frameCount: 0, sessionId: null,
+    startTimestamp: null, currentView: "dashboard",
+    fpsCounter: 0, currentFPS: 0,
+    _localAngles: { shoulder_angle_L: null, shoulder_angle_R: null },
+    // Sequential state
+    isSequential: false, seqStep: 0, seqTotal: 3,
+    seqReports: [], seqResults: [],
+    // Alert state
+    alertAudio: null, alertThrottle: {},
+};
+
+app.SEQUENCE = [
+    { step: 1, instruction: "raise_hands", label: "Angkat Kedua Tangan", desc: "Angkat kedua tangan setinggi bahu", duration: 15 },
+    { step: 2, instruction: "stand_still", label: "Berdiri Diam", desc: "Berdiri tegak, tangan direntangkan, tahan posisi", duration: 20 },
+    { step: 3, instruction: "sit_to_stand", label: "Duduk ke Berdiri", desc: "Duduk di kursi, lalu berdiri perlahan", duration: 15 },
+];
+
+// ═══ Init ═══════════════════════════════════════════════════
+document.addEventListener("DOMContentLoaded", () => {
+    initWebSocket(); initFPSCounter(); loadStats();
+    initAlertSystem();
+});
+
+function initWebSocket() {
+    app.ws = new WSClient();
+    app.ws.onStatusChange = (s) => {
+        const d = document.getElementById("sb-dot"), t = document.getElementById("sb-text");
+        if (s === "connected") { if (d) d.className = "dot dot-green"; if (t) t.textContent = "Online"; }
+        else { if (d) d.className = "dot dot-red"; if (t) t.textContent = "Offline"; }
+    };
+    app.ws.onMetrics = handleMetrics;
+    app.ws.onReport = handleReport;
+    app.ws.onAck = (a) => { app.sessionId = a.session_id; };
+    app.ws.onError = (m) => console.warn("[WS]", m);
+    app.ws.connect();
+}
+
+function initFPSCounter() {
+    setInterval(() => {
+        app.currentFPS = app.fpsCounter; app.fpsCounter = 0;
+        setText("sb-fps", `FPS: ${app.currentFPS}`);
+        setText("sb-ping", `Ping: ${app.ws ? app.ws.getLatency() : "—"} ms`);
+        setText("sb-frame", `Frame: ${app.frameCount}`);
+    }, 1000);
+}
+
+function initAlertSystem() {
+    try { app.alertAudio = new AudioContext(); } catch (e) {}
+    if ("Notification" in window && Notification.permission === "default") {
+        const b = document.getElementById("notif-btn");
+        if (b) { b.style.display = "flex"; b.onclick = () => Notification.requestPermission(); }
+    }
+}
+
+// ═══ Voice Instruction ══════════════════════════════════════
+app.lastVoiceAlert = 0;
+app.currentAudio = null;
+
+function speakInstruction(text, priority = false) {
+    if (!priority && app.currentAudio && !app.currentAudio.paused) return; // Jangan tumpuk jika sedang bicara
+    
+    if (app.currentAudio) {
+        app.currentAudio.pause();
+        app.currentAudio.currentTime = 0;
+    }
+    
+    // Proxy request ke backend agar tidak diblokir OpaqueResponseBlocking (ORB) oleh browser
+    const backendPort = window.location.port === "5173" || window.location.port === "5500" ? 8765 : (window.location.port || 8765);
+    const host = window.location.hostname || "127.0.0.1";
+    const url = `http://${host}:${backendPort}/api/tts?text=${encodeURIComponent(text)}`;
+    
+    app.currentAudio = new Audio(url);
+    app.currentAudio.play().catch(e => console.warn("[TTS] Gagal memutar suara:", e));
+}
+
+function playBeep(freq = 880, dur = 0.15) {
+    if (!app.alertAudio) return;
+    try {
+        const osc = app.alertAudio.createOscillator();
+        const gain = app.alertAudio.createGain();
+        osc.connect(gain); gain.connect(app.alertAudio.destination);
+        osc.frequency.value = freq; osc.type = "square";
+        gain.gain.setValueAtTime(0.1, app.alertAudio.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, app.alertAudio.currentTime + dur);
+        osc.start(); osc.stop(app.alertAudio.currentTime + dur);
+    } catch (e) {}
+}
+
+function sendNotification(title, body) {
+    if ("Notification" in window && Notification.permission === "granted") {
+        new Notification(title, { body, icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='%23ef4444'/></svg>" });
+    }
+}
+
+// ═══ View Navigation ═══════════════════════════════════════
+app.showView = function(name) {
+    app.currentView = name;
+    document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+    document.querySelectorAll(".nav-item").forEach(b => b.classList.remove("active"));
+    const ve = document.getElementById(`view-${name}`);
+    if (ve) ve.classList.add("active");
+    const nb = document.querySelector(`.nav-item[data-view="${name}"]`);
+    if (nb) nb.classList.add("active");
+};
+
+// ═══ Stats ═════════════════════════════════════════════════
+async function loadStats() {
+    try {
+        const r = await fetch("/api/dashboard/stats");
+        if (!r.ok) return;
+        const s = await r.json();
+        setText("stat-patients", s.total_patients || 0);
+        setText("stat-sessions", s.total_sessions || 0);
+        setText("stat-normal", s.risk_distribution?.normal || 0);
+        setText("stat-monitor", s.risk_distribution?.monitor || 0);
+        setText("stat-referal", s.risk_distribution?.referal || 0);
+    } catch (e) { console.warn("Stats:", e); }
+}
+
+function setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
+
+// ═══ Sequential Assessment ═════════════════════════════════
+app.startSequential = async function() {
+    const pid = document.getElementById("patient-id").value || `PT-${Date.now()}`;
+    app.isSequential = true; app.seqStep = 0; app.seqResults = [];
+    app.showView("assessment");
+    setText("assess-title", "Full Assessment (3-in-1)");
+    setText("assess-patient", `Pasien: ${pid}`);
+    // Show step indicator
+    const si = document.getElementById("seq-indicator");
+    if (si) si.style.display = "flex";
+    updateSeqStep(0);
+    // Show guide
+    const pg = document.getElementById("pose-guide");
+    if (pg) pg.classList.remove("hidden");
+    // Start first step
+    await startSeqStep(pid);
+};
+
+async function startSeqStep(pid) {
+    if (app.seqStep >= app.seqTotal) { finishSequential(); return; }
+    const stepData = app.SEQUENCE[app.seqStep];
+    updateSeqStep(app.seqStep);
+    // Update guide text and speak
+    const gt = document.getElementById("guide-text");
+    if (gt) gt.textContent = stepData.desc;
+    speakInstruction("Tahap selanjutnya. " + stepData.desc);
+    
+    // Start session for this step
+    const age = document.getElementById("patient-age")?.value || null;
+    app.ws.startSession(pid, stepData.instruction, age);
+    // Init MediaPipe + charts
+    await startSingleAssessment(stepData);
+}
+
+function updateSeqStep(step) {
+    for (let i = 1; i <= app.seqTotal; i++) {
+        const el = document.getElementById(`seq-step-${i}`);
+        if (el) {
+            el.classList.toggle("active", i === step + 1);
+            el.classList.toggle("done", i <= step);
+        }
+    }
+    setText("seq-progress", `${step}/${app.seqTotal}`);
+}
+
+function finishSequential() {
+    app.isSequential = false;
+    app.stopAssessment(); // Matikan kamera setelah semua tahap selesai
+    const si = document.getElementById("seq-indicator");
+    if (si) si.style.display = "none";
+    const pg = document.getElementById("pose-guide");
+    if (pg) pg.classList.add("hidden");
+    // Send sequential_end to get aggregated report
+    app.ws.send({ type: "sequential_end" });
+}
+
+// ═══ Report Handler ════════════════════════════════════════
+function handleReport(report) {
+    console.log("[App] Received report:", report);
+    
+    // Store for sequential
+    if (app.isSequential) {
+        app.seqResults.push(report);
+        app.seqStep++;
+        const pid = document.getElementById("patient-id")?.value || "PT-001";
+        setTimeout(() => startSeqStep(pid), 2000);
+        return;
+    }
+    
+    // Show single report
+    displayReport(report, false);
+    app.showView("reports");
+    loadStats();
+}
+
+function displayReport(report, isAggregated) {
+    const rl = report.risk_levels || {};
+    
+    // Construct doctor-like speech
+    let docSpeech = "Penilaian klinis selesai. Berdasarkan hasil skrining, ";
+    let findings = [];
+    
+    if (rl.stroke === "referal") findings.push("terdapat asimetri postur yang signifikan, mengindikasikan risiko tinggi gangguan motorik sebelah tubuh");
+    else if (rl.stroke === "monitor") findings.push("terdapat asimetri ringan yang perlu diobservasi berkala");
+    
+    if (rl.parkinson === "referal") findings.push("terdeteksi pola tremor yang berisiko Parkinson");
+    else if (rl.parkinson === "monitor") findings.push("terdeteksi indikasi tremor ringan yang perlu diwaspadai");
+    
+    if (rl.sarcopenia === "referal") findings.push("kecepatan gerak Anda terdeteksi lambat, mengindikasikan risiko kelemahan otot atau Sarcopenia");
+    else if (rl.sarcopenia === "monitor") findings.push("kecepatan gerak Anda berada di ambang batas peringatan, mohon jaga kekuatan otot Anda");
+
+    if (findings.length === 0) {
+        docSpeech += "secara keseluruhan kondisi gerak motorik Anda normal dan stabil. Pertahankan gaya hidup sehat Anda.";
+    } else {
+        docSpeech += findings.join(", dan ") + ". Kami merekomendasikan Anda untuk berkonsultasi lebih lanjut dengan dokter spesialis untuk evaluasi yang lebih akurat.";
+    }
+
+    speakInstruction(docSpeech, true);
+
+    const el = document.getElementById("report-content");
+    const empty = document.getElementById("report-empty");
+    if (!el || !empty) return;
+    empty.style.display = "none";
+    el.style.display = "flex";
+
+    const riskLabel = (r) => r === "referal" ? "REFERAL" : r === "monitor" ? "MONITOR" : "NORMAL";
+    const riskClass = (r) => r === "referal" ? "referal" : r === "monitor" ? "monitor" : "normal";
+
+    // Calculate overall confidence
+    const cs = report.confidence_scores || {};
+    const overall = cs.overall || Math.round((cs.stroke || 0 + cs.parkinson || 0 + cs.sarcopenia || 0) / 3 * 100) || 0;
+
+    const m = report.metrics || report;
+    const asiInfo = isAggregated ? "See step details" : (m.asymmetry?.meanASI || m.meanASI || "-");
+    const freqInfo = isAggregated ? "See step details" : (m.tremor?.dominant_freq_hz || m.dominant_freq || "-");
+    const stsInfo = isAggregated ? "See step details" : (m.sit_to_stand?.duration_s || m.transition_duration || "-");
+
+    let stepDetails = "";
+    if (isAggregated && app.seqResults.length > 0) {
+        stepDetails = `<div class="card glass" style="margin-top:12px"><div class="card-header"><h2>Detail per Step</h2></div>`;
+        app.seqResults.forEach((r, i) => {
+            const srl = r.risk_levels || {};
+            stepDetails += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+                <strong>Step ${i+1}: ${r.instruction || ""}</strong> — 
+                Stroke: ${riskLabel(srl.stroke)}, Parkinson: ${riskLabel(srl.parkinson)}, Sarcopenia: ${riskLabel(srl.sarcopenia)}
+            </div>`;
+        });
+        stepDetails += `</div>`;
+    }
+
+    el.innerHTML = `
+        <div class="report-risks">
+            <div class="risk-card glass"><div class="risk-label">Stroke</div><div class="risk-value ${riskClass(rl.stroke)}">${riskLabel(rl.stroke)}</div><div class="risk-sub">ASI: ${asiInfo}</div></div>
+            <div class="risk-card glass"><div class="risk-label">Parkinson</div><div class="risk-value ${riskClass(rl.parkinson)}">${riskLabel(rl.parkinson)}</div><div class="risk-sub">Freq: ${freqInfo}</div></div>
+            <div class="risk-card glass"><div class="risk-label">Sarcopenia</div><div class="risk-value ${riskClass(rl.sarcopenia)}">${riskLabel(rl.sarcopenia)}</div><div class="risk-sub">Durasi: ${stsInfo}</div></div>
+        </div>
+        <div class="card glass" style="text-align:center;padding:24px"><div class="risk-label">CONFIDENCE SCORE</div><div style="font-size:48px;font-weight:800;background:linear-gradient(135deg,#3b82f6,#22c55e);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${overall}%</div></div>
+        ${stepDetails}
+        <div class="card glass"><div class="card-header"><h2>Rekomendasi</h2></div><p style="color:var(--text-secondary);line-height:1.6">${report.recommendation || ""}</p></div>
+        <div class="report-narrative glass"><div class="card-header"><h2>Narasi Klinis</h2></div><pre>${report.narrative || ""}</pre></div>
+        <div style="text-align:center;padding:16px 0;display:flex;gap:12px;justify-content:center">
+            <button class="btn btn-primary" onclick="app.showView('dashboard');loadStats()">Kembali</button>
+            <button class="btn btn-danger btn-sm" onclick="exportPDF()">📄 Download PDF</button>
+        </div>
+    `;
+}
+
+// ═══ PDF Export ═════════════════════════════════════════════
+async function exportPDF() {
+    if (typeof window.jspdf === 'undefined') {
+        // Load dynamically
+        await Promise.all([
+            new Promise(r => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'; s.onload = r; document.head.appendChild(s); }),
+            new Promise(r => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'; s.onload = r; document.head.appendChild(s); }),
+        ]);
+    }
+    const el = document.getElementById("report-content");
+    if (!el) return;
+    try {
+        const canvas = await html2canvas(el, { backgroundColor: "#0f172a", scale: 2 });
+        const imgData = canvas.toDataURL("image/png");
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+        const w = pdf.internal.pageSize.getWidth();
+        const h = (canvas.height * w) / canvas.width;
+        pdf.addImage(imgData, "PNG", 0, 0, w, h);
+        pdf.save(`NeuroMotorik_Report_${new Date().toISOString().slice(0,10)}.pdf`);
+    } catch (e) {
+        alert("PDF export gagal: " + e.message);
+    }
+}
+
+// ═══ Assessment ═════════════════════════════════════════════
+app.startAssessment = async function() {
+    const pid = document.getElementById("patient-id").value || `PT-${Date.now()}`;
+    const inst = document.getElementById("instruction-select").value;
+    app.isSequential = false;
+    app.showView("assessment");
+    // Hide sequential indicator
+    const si = document.getElementById("seq-indicator"); if (si) si.style.display = "none";
+    const pg = document.getElementById("pose-guide"); if (pg) pg.classList.add("hidden");
+    const labels = { raise_hands: "Angkat Kedua Tangan", stand_still: "Berdiri Diam", sit_to_stand: "Duduk ke Berdiri" };
+    setText("assess-title", labels[inst] || inst);
+    setText("assess-patient", `Pasien: ${pid}`);
+    const sc = document.getElementById("sts-card"); if (sc) sc.style.display = inst === "sit_to_stand" ? "block" : "none";
+    // Start session
+    const age = document.getElementById("patient-age")?.value || null;
+    app.ws.startSession(pid, inst, age);
+    
+    speakInstruction("Silakan mulai " + (labels[inst] || inst));
+    await startSingleAssessment({ instruction: inst, duration: 60 });
+};
+
+async function startSingleAssessment(opts) {
+    if (app.charts) app.charts.destroy();
+    app.charts = new ChartManager();
+    app.charts.initASI();
+    app.charts.initPSD();
+    app.frameCount = 0;
+    app.isRecording = true;
+    app.startTimestamp = performance.now() / 1000;
+    app._localAngles = { shoulder_angle_L: null, shoulder_angle_R: null };
+    await initMediaPipe(opts.instruction);
+    updateTimer(opts.duration * 1000);
+}
+
+function updateTimer(maxMs) {
+    if (!app.isRecording) return;
+    const elapsed = performance.now() - app.startTimestamp * 1000;
+    const mins = Math.floor(elapsed / 60000).toString().padStart(2, "0");
+    const secs = Math.floor((elapsed % 60000) / 1000).toString().padStart(2, "0");
+    setText("timer", `${mins}:${secs}`);
+    setText("frame-counter", `Frame: ${app.frameCount}`);
+    const pct = Math.min(100, (elapsed / maxMs) * 100);
+    const bar = document.getElementById("progress-bar"), label = document.getElementById("progress-text");
+    if (bar) bar.style.width = pct + "%";
+    if (label) label.textContent = Math.round(pct) + "%";
+    if (pct >= 100) { 
+        app.isRecording = false; // Stop recording to pause engine updates
+        if (app.isSequential) {
+            // For sequential, just end the session on backend to get the report
+            if (app.sessionId) app.ws.endSession(app.sessionId);
+        } else {
+            app.stopAssessment(); 
+        }
+        return; 
+    }
+    requestAnimationFrame(() => updateTimer(maxMs));
+}
+
+// ═══ MediaPipe ═════════════════════════════════════════════
+async function initMediaPipe(instruction) {
+    // Jika kamera sudah berjalan, jangan re-init (mencegah kamera mati saat transisi 3-in-1)
+    if (app.camera && app.pose) {
+        return;
+    }
+    
+    const ve = document.getElementById("webcam"), ce = document.getElementById("skeleton-canvas");
+    app.skeleton = new SkeletonRenderer(ve, ce);
+    if (app.pose) { try { app.pose.close(); } catch (e) {} app.pose = null; }
+    const pose = new Pose({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
+    pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+    pose.onResults((r) => {
+        if (!app.isRecording) return;
+        app.fpsCounter++;
+        
+        if (!r.poseLandmarks || r.poseLandmarks.length === 0) {
+            // Tangan atau badan tidak terdeteksi sama sekali!
+            const now = performance.now();
+            if (now - app.lastVoiceAlert > 10000) { // 10 detik cooldown
+                speakInstruction("Mohon posisikan badan Anda agar terlihat jelas di depan kamera", true);
+                app.lastVoiceAlert = now;
+            }
+            return;
+        }
+
+        const lms = r.poseLandmarks.map((lm, i) => ({ id: i, x: lm.x, y: lm.y, z: lm.z, vis: lm.visibility !== undefined ? lm.visibility : 1.0 }));
+        
+        // Peringatan jika tangan (pergelangan) tidak terlihat (visibilitas sangat rendah)
+        const leftWrist = lms[15], rightWrist = lms[16];
+        if (leftWrist && rightWrist && (leftWrist.vis < 0.2 || rightWrist.vis < 0.2)) {
+            const now = performance.now();
+            if (now - app.lastVoiceAlert > 8000) {
+                speakInstruction("Tangan Anda tidak terlihat di kamera. Mundur sedikit atau sesuaikan kamera.", true);
+                app.lastVoiceAlert = now;
+            }
+        }
+        
+        app.skeleton.draw(lms, app._localAngles);
+        app.frameCount++;
+        app.ws.sendLandmarks(app.frameCount, performance.now() / 1000, lms);
+    });
+    await pose.initialize();
+    app.pose = pose;
+    try {
+        if (!window.Camera) throw new Error("CameraUtils not loaded");
+        app.camera = new Camera(ve, { onFrame: async () => { if (app.isRecording && app.pose) await app.pose.send({ image: ve }); }, width: 640, height: 480 });
+        await app.camera.start();
+    } catch (e) { console.error("Camera:", e); alert("Tidak dapat mengakses kamera: " + e.message); app.stopAssessment(); }
+}
+
+// ═══ Metrics Handler ════════════════════════════════════════
+function handleMetrics(m) {
+    if (m.shoulder_angle_L != null) app._localAngles.shoulder_angle_L = m.shoulder_angle_L;
+    if (m.shoulder_angle_R != null) app._localAngles.shoulder_angle_R = m.shoulder_angle_R;
+    if (m.ASI != null) { setText("asi-value", m.ASI.toFixed(3)); if (app.charts) app.charts.updateASI(m.frame, m.ASI); }
+    if (m.shoulder_angle_L != null) setText("angle-L", m.shoulder_angle_L.toFixed(1));
+    if (m.shoulder_angle_R != null) setText("angle-R", m.shoulder_angle_R.toFixed(1));
+    if (m.dominant_freq_hz != null) setText("freq-dom", m.dominant_freq_hz.toFixed(1));
+    if (m.tremor_amplitude != null) setText("tremor-amp", m.tremor_amplitude.toFixed(4));
+    if (m.psd_freqs && m.psd_power && app.charts) app.charts.updatePSD(m.psd_freqs, m.psd_power);
+    if (m.confidence != null) {
+        const ce = document.getElementById("confidence-value"), cb = document.getElementById("confidence-fill");
+        if (ce) ce.textContent = Math.round(m.confidence * 100) + "%";
+        if (cb) cb.style.width = Math.round(m.confidence * 100) + "%";
+    }
+
+    // Voice Alert Handling
+    if (m.alert) {
+        const now = performance.now();
+        if (now - app.lastVoiceAlert > 6000) { // 6 detik cooldown
+            if (m.alert === "stroke_alert") {
+                speakInstruction("Peringatan, asimetri terdeteksi. Usahakan angkat kedua tangan Anda lebih tegak dan sejajar.", true);
+            } else if (m.alert === "stroke_warning") {
+                speakInstruction("Angkat sedikit lagi agar posisi tangan lebih sejajar.", true);
+            }
+            app.lastVoiceAlert = now;
+        }
+    }
+    
+    // Sit-to-stand voice feedback
+    if (m.sts_phase && m.sts_phase !== app.lastStsPhase) {
+        if (m.sts_phase === "standing" && app.lastStsPhase === "transition") {
+            speakInstruction("Bagus, sekarang silakan duduk kembali.");
+        } else if (m.sts_phase === "sitting" && app.lastStsPhase === "transition") {
+            speakInstruction("Bagus, silakan berdiri kembali.");
+        }
+        app.lastStsPhase = m.sts_phase;
+    }
+    
+    // Sit-to-stand
+    if (m.sts_phase) { ["ph-sitting","ph-transition","ph-standing"].forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove("active"); }); const map = { sitting:"ph-sitting", transition:"ph-transition", standing:"ph-standing" }; if (map[m.sts_phase]) { const el = document.getElementById(map[m.sts_phase]); if (el) el.classList.add("active"); } }
+    if (m.sts_duration != null) setText("sts-dur", m.sts_duration.toFixed(2) + " s");
+    // Alert logic
+    if (m.ASI != null && m.ASI > 0.15 && !app.alertThrottle["asi"]) {
+        app.alertThrottle["asi"] = true;
+        playBeep(1200, 0.2); sendNotification("⚠️ Alert Asimetri", "ASI: " + m.ASI.toFixed(3) + " — melebihi threshold");
+        setTimeout(() => delete app.alertThrottle["asi"], 5000);
+    }
+    if (m.ASI != null && m.ASI > 0.08 && m.ASI <= 0.15 && !app.alertThrottle["asi_warn"]) {
+        app.alertThrottle["asi_warn"] = true;
+        playBeep(600, 0.15);
+        setTimeout(() => delete app.alertThrottle["asi_warn"], 8000);
+    }
+    // Status badge
+    const badge = document.getElementById("status-badge"), stxt = document.getElementById("status-text");
+    if (badge && stxt) {
+        if (m.status === "alert_asymmetry" || m.status === "alert_slow") { badge.className = "status-overlay alert"; stxt.textContent = "Alert"; }
+        else if (m.ASI != null && m.ASI > 0.08) { badge.className = "status-overlay warning"; stxt.textContent = "Waspada"; }
+        else { badge.className = "status-overlay normal"; stxt.textContent = "Normal"; }
+    }
+}
+
+// ═══ Stop ══════════════════════════════════════════════════
+app.stopAssessment = function() {
+    app.isRecording = false;
+    if (app.mediaStream) { app.mediaStream.getTracks().forEach(t => t.stop()); app.mediaStream = null; }
+    if (app.pose) { try { app.pose.close(); } catch(e) {} app.pose = null; }
+    if (app.skeleton) app.skeleton.clear();
+    const ve = document.getElementById("webcam"); if (ve) ve.srcObject = null;
+    if (app.sessionId) app.ws.endSession(app.sessionId);
+};
+</file>
+
+<file path="client/index.html">
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeuroMotorik Screener — Vision-Based Health Assessment</title>
+    <meta name="description" content="Sistem skrining neuro-motorik berbasis AI untuk deteksi dini Stroke, Parkinson, dan Sarcopenia menggunakan webcam dan MediaPipe Pose.">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- MediaPipe Pose -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+    <!-- jsPDF + html2canvas (for PDF export) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
+
+    <link rel="stylesheet" href="css/style.css?v=3">
+</head>
+<body>
+
+    <!-- ═══ SIDEBAR ═══════════════════════════════════════════ -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2a4 4 0 0 0-4 4v2a4 4 0 0 0 8 0V6a4 4 0 0 0-4-4z"/>
+                    <path d="M6 10v1a6 6 0 0 0 12 0v-1"/>
+                    <path d="M12 17v4"/>
+                    <path d="M8 21h8"/>
+                </svg>
+            </div>
+            <div class="brand-text">
+                <span class="brand-name">NeuroMotorik</span>
+                <span class="brand-tag">Screening v2.0</span>
+            </div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <button class="nav-item active" data-view="dashboard" onclick="app.showView('dashboard')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                <span>Dashboard</span>
+            </button>
+            <button class="nav-item" data-view="assessment" onclick="app.showView('assessment')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><path d="M10 22V18L7 15V11l5-3 5 3v4l-3 3v4"/></svg>
+                <span>Assessment</span>
+            </button>
+            <button class="nav-item" data-view="reports" onclick="app.showView('reports')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                <span>Laporan</span>
+            </button>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="connection-indicator" id="conn-indicator">
+                <span class="conn-dot"></span>
+                <span class="conn-text" id="conn-text">Connecting...</span>
+            </div>
+            <button class="btn btn-sm" id="notif-btn" style="display:none;margin-top:8px;width:100%;background:var(--blue);color:white;border:none;border-radius:6px;padding:6px;cursor:pointer;font-size:11px">🔔 Enable Notifications</button>
+        </div>
+    </aside>
+
+    <!-- ═══ MAIN CONTENT ═══════════════════════════════════════ -->
+    <main class="main-content">
+
+        <!-- ═══ DASHBOARD VIEW ═══════════════════════════════ -->
+        <section id="view-dashboard" class="view active">
+            <header class="view-header">
+                <div>
+                    <h1>Dashboard</h1>
+                    <p class="subtitle">Sistem Skrining Multi-Anomali Neuro-Motorik</p>
+                </div>
+                <div class="header-badge">LIVE</div>
+            </header>
+
+            <!-- Stats Cards -->
+            <div class="stats-row">
+                <div class="stat-card glass">
+                    <div class="stat-icon blue">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value counter" data-target="0" id="stat-patients">0</span>
+                        <span class="stat-label">Total Pasien</span>
+                    </div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-icon purple">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value counter" data-target="0" id="stat-sessions">0</span>
+                        <span class="stat-label">Total Sesi</span>
+                    </div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-icon green">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-normal">0</span>
+                        <span class="stat-label">Normal</span>
+                    </div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-icon yellow">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-monitor">0</span>
+                        <span class="stat-label">Monitor</span>
+                    </div>
+                </div>
+                <div class="stat-card glass">
+                    <div class="stat-icon red">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-referal">0</span>
+                        <span class="stat-label">Referal</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Start -->
+            <div class="card glass">
+                <div class="card-header">
+                    <h2>Mulai Assessment Baru</h2>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Patient ID</label>
+                        <input type="text" id="patient-id" placeholder="contoh: PT-2026-001" value="">
+                    </div>
+                    <div class="form-group">
+                        <label>Usia (tahun)</label>
+                        <input type="number" id="patient-age" placeholder="contoh: 65" min="0" max="120" value="">
+                    </div>
+                    <div class="form-group">
+                        <label>Instruksi Klinis</label>
+                        <select id="instruction-select">
+                            <option value="raise_hands">Angkat Kedua Tangan — Deteksi Stroke</option>
+                            <option value="stand_still">Berdiri Diam — Deteksi Parkinson</option>
+                            <option value="sit_to_stand">Duduk ke Berdiri — Deteksi Sarcopenia</option>
+                        </select>
+                    </div>
+                    <div class="form-group form-actions">
+                        <button class="btn btn-primary btn-lg" id="btn-start" onclick="app.startAssessment()">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            Mulai
+                        </button>
+                    </div>
+                </div>
+                <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+                    <button class="btn btn-primary btn-lg" style="width:100%;background:linear-gradient(135deg,#8b5cf6,#3b82f6)" onclick="app.startSequential()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                        Full Assessment (3-in-1) — Semua Tes Sekaligus
+                    </button>
+                </div>
+            </div>
+
+            <!-- Evidence Info -->
+            <div class="card glass evidence-info">
+                <div class="card-header">
+                    <h2>📊 Basis Klinis</h2>
+                </div>
+                <div class="evidence-grid">
+                    <div class="evidence-item">
+                        <div class="evidence-icon stroke-icon">🧠</div>
+                        <div class="evidence-content">
+                            <strong>Stroke — Asymmetry Index</strong>
+                            <p>Whitall et al. (2006), Kim et al. (2014)<br>ASI ≤ 0.08 Normal | 0.08–0.15 Monitor | &gt; 0.15 Referal</p>
+                        </div>
+                    </div>
+                    <div class="evidence-item">
+                        <div class="evidence-icon parkinson-icon">🫨</div>
+                        <div class="evidence-content">
+                            <strong>Parkinson — Tremor Analysis</strong>
+                            <p>PPMI Dataset, Jankovic (2008)<br>Rest tremor 3.5–7.0 Hz | Amplitude &gt; 0.003 suspicious</p>
+                        </div>
+                    </div>
+                    <div class="evidence-item">
+                        <div class="evidence-icon sarcopenia-icon">🦴</div>
+                        <div class="evidence-content">
+                            <strong>Sarcopenia — Sit-to-Stand</strong>
+                            <p>Bohannon (2006), Guralnik et al. (2000)<br>Age-stratified thresholds (5XSST normative data)</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ ASSESSMENT VIEW ═══════════════════════════════ -->
+        <section id="view-assessment" class="view">
+            <header class="view-header">
+                <div>
+                    <h1 id="assess-title">Assessment</h1>
+                    <p class="subtitle" id="assess-patient">Pasien: ---</p>
+                </div>
+                <!-- Sequential Step Indicator -->
+                <div id="seq-indicator" class="seq-indicator" style="display:none">
+                    <div class="seq-step active" id="seq-step-1"><span class="seq-num">1</span><span class="seq-label">Angkat</span></div>
+                    <div class="seq-arrow">→</div>
+                    <div class="seq-step" id="seq-step-2"><span class="seq-num">2</span><span class="seq-label">Berdiri</span></div>
+                    <div class="seq-arrow">→</div>
+                    <div class="seq-step" id="seq-step-3"><span class="seq-num">3</span><span class="seq-label">Duduk</span></div>
+                    <span class="seq-progress" id="seq-progress">0/3</span>
+                </div>
+                <div class="assess-controls">
+                    <span class="timer" id="timer">00:00</span>
+                    <span class="frame-badge" id="frame-counter">Frame: 0</span>
+                    <button class="btn btn-danger btn-sm" id="btn-stop" onclick="app.stopAssessment()">Selesai</button>
+                </div>
+            </header>
+
+            <div class="assessment-layout">
+                <!-- Left: Video + Skeleton -->
+                <div class="video-column">
+                    <div class="video-wrapper glass">
+                        <video id="webcam" autoplay playsinline muted></video>
+                        <canvas id="skeleton-canvas"></canvas>
+                        <div id="pose-guide" class="pose-guide hidden">
+                            <div class="guide-text" id="guide-text"></div>
+                        </div>
+                        <div id="status-badge" class="status-overlay normal">
+                            <span class="pulse-dot"></span>
+                            <span id="status-text">Normal</span>
+                        </div>
+                    </div>
+                    <!-- Confidence + Progress -->
+                    <div class="progress-confidence-row">
+                        <div class="confidence-indicator">
+                            <span class="confidence-label">Confidence:</span>
+                            <div class="confidence-track">
+                                <div id="confidence-fill" class="confidence-fill"></div>
+                            </div>
+                            <span id="confidence-value" class="confidence-value">0%</span>
+                        </div>
+                        <div class="progress-wrapper">
+                            <div class="progress-track">
+                                <div id="progress-bar" class="progress-fill"></div>
+                            </div>
+                            <span id="progress-text" class="progress-label">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Live Metrics -->
+                <div class="metrics-column">
+                    <!-- ASI Card -->
+                    <div class="metric-card glass">
+                        <div class="mc-header">
+                            <h3>Indeks Asimetri</h3>
+                            <span class="mc-badge normal" id="asi-badge">Normal</span>
+                        </div>
+                        <div class="mc-big-value" id="asi-value">0.000</div>
+                        <div class="threshold-bar">
+                            <div class="tb-segment green" style="width:40%"></div>
+                            <div class="tb-segment yellow" style="width:35%"></div>
+                            <div class="tb-segment red" style="width:25%"></div>
+                        </div>
+                        <div class="tb-labels"><span>0</span><span>0.08</span><span>0.15</span><span>0.30</span></div>
+                        <div class="mc-detail">
+                            <div>Sudut Kiri: <strong id="angle-L">-</strong>&deg;</div>
+                            <div>Sudut Kanan: <strong id="angle-R">-</strong>&deg;</div>
+                        </div>
+                    </div>
+
+                    <!-- ASI Chart -->
+                    <div class="metric-card glass">
+                        <div class="mc-header"><h3>ASI Time Series</h3></div>
+                        <canvas id="chart-asi" height="130"></canvas>
+                    </div>
+
+                    <!-- Tremor Chart -->
+                    <div class="metric-card glass">
+                        <div class="mc-header"><h3>Power Spectral Density</h3></div>
+                        <canvas id="chart-psd" height="150"></canvas>
+                        <div class="mc-detail">
+                            <div>Freq: <strong id="freq-dom">-</strong> Hz</div>
+                            <div>Amplitudo: <strong id="tremor-amp">-</strong></div>
+                        </div>
+                    </div>
+
+                    <!-- Sit-to-Stand -->
+                    <div class="metric-card glass" id="sts-card" style="display:none">
+                        <div class="mc-header"><h3>Transisi Duduk-Berdiri</h3></div>
+                        <div class="phase-track">
+                            <div class="phase-dot active" id="ph-sitting">Duduk</div>
+                            <div class="phase-line"></div>
+                            <div class="phase-dot" id="ph-transition">Transisi</div>
+                            <div class="phase-line"></div>
+                            <div class="phase-dot" id="ph-standing">Berdiri</div>
+                        </div>
+                        <div class="mc-big-value" id="sts-dur">- s</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ REPORTS VIEW ══════════════════════════════════ -->
+        <section id="view-reports" class="view">
+            <header class="view-header">
+                <div>
+                    <h1>Laporan Assessment</h1>
+                    <p class="subtitle">Ringkasan hasil skrining klinis</p>
+                </div>
+            </header>
+
+            <div id="report-empty" class="empty-state glass">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <p>Selesaikan sesi assessment untuk melihat laporan di sini.</p>
+            </div>
+
+            <div id="report-content" class="report-result" style="display:none"></div>
+        </section>
+    </main>
+
+    <!-- ═══ STATUS BAR ════════════════════════════════════════ -->
+    <footer class="statusbar">
+        <div class="sb-left">
+            <span class="sb-item"><span class="dot dot-red" id="sb-dot"></span> <span id="sb-text">Offline</span></span>
+            <span class="sb-divider"></span>
+            <span class="sb-item" id="sb-ping">Ping: — ms</span>
+        </div>
+        <div class="sb-center">
+            <span class="sb-item" id="sb-fps">FPS: 0</span>
+            <span class="sb-divider"></span>
+            <span class="sb-item" id="sb-frame">Frame: 0</span>
+        </div>
+        <div class="sb-right">
+            <span class="sb-item" id="sb-server">Server: —</span>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="js/websocket-client.js?v=5"></script>
+    <script src="js/skeleton-renderer.js?v=2"></script>
+    <script src="js/chart-manager.js?v=2"></script>
+    <script src="js/main.js?v=12"></script>
+
+</body>
+</html>
+</file>
+
+</files>

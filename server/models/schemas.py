@@ -20,6 +20,8 @@ class InstructionType(str, Enum):
     RAISE_HANDS   = "raise_hands"
     STAND_STILL   = "stand_still"
     SIT_TO_STAND  = "sit_to_stand"
+    REHAB_ARM_RAISE = "rehab_arm_raise"
+    REHAB_SQUAT     = "rehab_squat"
 
 
 # ─── Landmark ───────────────────────────────────────────
@@ -84,6 +86,17 @@ class KinematicMetrics(BaseModel):
     psd_power:          Optional[List[float]] = None
     confidence:         Optional[float] = None
     status:             str = "recording"
+
+
+class RehabMetrics(BaseModel):
+    """Metrik gamifikasi rehab per frame — dikirim ke client PhysioLens."""
+    type:          str = "rehab_metrics"
+    frame:         int
+    rep_count:     int   = 0
+    form_score:    float = 0.0
+    feedback_msg:  str   = ""
+    phase:         Optional[str] = None
+    target_reps:   int   = 10
 
 
 class HeartbeatAck(BaseModel):

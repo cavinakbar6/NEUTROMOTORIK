@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import List, Optional, Tuple
 
 from models.schemas import (
-    Landmark, KinematicMetrics, ClinicalReport, RiskLevel
+    Landmark, KinematicMetrics, ClinicalReport, RiskLevel, RehabMetrics
 )
 from core.angle_calculator import AngleCalculator
 from core.tremor_analyzer import TremorAnalyzer
@@ -70,6 +70,11 @@ class KinematicEngine:
         th = SARCOPENIA.get_thresholds(self.patient_age)
         return th.monitor_max_s
 
+    @property
+    def _is_rehab(self) -> bool:
+        """Check if current instruction is a rehab (gamification) mode."""
+        return self.instruction in ("rehab_arm_raise", "rehab_squat")
+
     def _init_tracking_vars(self):
         """Init all tracking variables separately to fix indentation issues."""
         # Per-frame paired angles for accurate ASI
@@ -84,6 +89,18 @@ class KinematicEngine:
         # Confidence tracking
         self._visibility_sum = 0.0
         self._visibility_count = 0
+
+        # ── Rehab (Gamification) tracking ──
+        # Rep counting: arm_raise tracks shoulder angle cycles,
+        # squat tracks sit→stand cycles via STS detector.
+        self._rehab_rep_count: int = 0
+        self._rehab_target_reps: int = 10
+        # Arm raise state machine: "down" = angle < threshold_down, "up" = angle > threshold_up
+        self._rehab_arm_phase: str = "down"  # "down" or "up"
+        self._rehab_arm_threshold_up: float = 150.0   # degrees to count as "up"
+        self._rehab_arm_threshold_down: float = 45.0   # degrees to count as "down"
+        # Smoothing for form score
+        self._rehab_form_scores: List[float] = []
 
     def _to_dict(self, landmarks: List[Landmark]) -> dict:
         """Konversi list landmarks ke dict {id: np.array[xyz]} dengan confidence filter."""
@@ -235,8 +252,135 @@ class KinematicEngine:
 
         return m
 
+    def process_rehab_frame(
+        self, frame_id: int, timestamp: float, landmarks: List[Landmark]
+    ) -> RehabMetrics:
+        """Process frame in rehab (gamification) mode. Returns RehabMetrics with reps and form score."""
+        self.frame_count += 1
+        pts = self._to_dict(landmarks)
+
+        rep_count = self._rehab_rep_count
+        form_score = 0.0
+        feedback_msg = ""
+        phase = None
+
+        if self.instruction == "rehab_arm_raise":
+            # Virtual hip fallback for shoulder angle calculation
+            if L_HIP not in pts and L_SHOULDER in pts:
+                pts[L_HIP] = pts[L_SHOULDER] + np.array([0, 0.5, 0])
+            if R_HIP not in pts and R_SHOULDER in pts:
+                pts[R_HIP] = pts[R_SHOULDER] + np.array([0, 0.5, 0])
+
+            # Average shoulder angle from both sides
+            theta_L = self._compute_angle(pts, L_SHOULDER, L_HIP, L_ELBOW)
+            theta_R = self._compute_angle(pts, R_SHOULDER, R_HIP, R_ELBOW)
+            angles = [a for a in [theta_L, theta_R] if a is not None]
+            avg_angle = float(np.mean(angles)) if angles else None
+
+            if avg_angle is not None:
+                # Form score: how close angle is to ideal 180°, scaled 0-100
+                # At rest (low angle) score is lower; at full raise (high angle) score is higher
+                raw_score = min(100.0, max(0.0, (avg_angle / 180.0) * 100.0))
+                # Boost score when symmetrical (both sides visible)
+                if theta_L is not None and theta_R is not None:
+                    asym = abs(theta_L - theta_R)
+                    symmetry_bonus = max(0.0, 20.0 - asym) / 20.0 * 15.0
+                    raw_score = min(100.0, raw_score + symmetry_bonus)
+                self._rehab_form_scores.append(raw_score)
+                if len(self._rehab_form_scores) > 60:
+                    self._rehab_form_scores.pop(0)
+                form_score = round(float(np.mean(self._rehab_form_scores)), 1)
+
+                # Phase detection for arm raise state machine
+                if self._rehab_arm_phase == "down" and avg_angle >= self._rehab_arm_threshold_up:
+                    self._rehab_arm_phase = "up"
+                elif self._rehab_arm_phase == "up" and avg_angle <= self._rehab_arm_threshold_down:
+                    # Completed one full cycle: down → up → down
+                    self._rehab_rep_count += 1
+                    self._rehab_arm_phase = "down"
+
+                phase = self._rehab_arm_phase
+                rep_count = self._rehab_rep_count
+
+                if form_score >= 85:
+                    feedback_msg = "Sempurna! Pertahankan!"
+                elif form_score >= 60:
+                    feedback_msg = "Bagus! Teruskan!"
+                elif form_score >= 30:
+                    feedback_msg = "Usahakan lebih tinggi!"
+                else:
+                    feedback_msg = "Angkat tangan Anda!"
+
+        elif self.instruction == "rehab_squat":
+            # Use existing STS detector for sit-to-stand phase tracking
+            if L_HIP in pts and R_HIP in pts:
+                mid_y = (pts[L_HIP][1] + pts[R_HIP][1]) / 2.0
+                sts_phase, dur = self.sts_detector.update(mid_y)
+
+                # Detect completed squat rep: standing → transition → standing
+                prev_phase = getattr(self, '_rehab_squat_prev_phase', 'standing')
+                if prev_phase == 'transition' and sts_phase == 'standing':
+                    self._rehab_rep_count += 1
+                self._rehab_squat_prev_phase = sts_phase  # type: ignore[attr-defined]
+
+                # Form score based on squat depth and symmetry
+                if dur is not None:
+                    raw_score = min(100.0, max(0.0, 100.0 - (dur - 1.0) * 20.0))
+                else:
+                    raw_score = 50.0
+                self._rehab_form_scores.append(raw_score)
+                if len(self._rehab_form_scores) > 60:
+                    self._rehab_form_scores.pop(0)
+                form_score = round(float(np.mean(self._rehab_form_scores)), 1)
+                phase = sts_phase
+                rep_count = self._rehab_rep_count
+
+                if form_score >= 85:
+                    feedback_msg = "Sempurna! Pertahankan!"
+                elif form_score >= 60:
+                    feedback_msg = "Bagus! Teruskan!"
+                elif form_score >= 30:
+                    feedback_msg = "Jongkok lebih dalam!"
+                else:
+                    feedback_msg = "Mulai jongkok perlahan!"
+
+        return RehabMetrics(
+            frame=frame_id,
+            rep_count=rep_count,
+            form_score=form_score,
+            feedback_msg=feedback_msg,
+            phase=phase,
+            target_reps=self._rehab_target_reps,
+        )
+
     def finalize(self, patient_id: str = "") -> ClinicalReport:
-        """Finalisasi sesi: hitung FFT, rata-rata metrik, klasifikasi risiko."""
+        """Finalisasi sesi: hitung FFT, rata-rata metrik, klasifikasi risiko.
+        For rehab sessions, returns a simplified ClinicalReport with rehab metrics.
+        """
+        # ── Rehab mode: return simplified report without FFT/risk computation ──
+        if self._is_rehab:
+            avg_form = float(np.mean(self._rehab_form_scores)) if self._rehab_form_scores else 0.0
+            duration = (self.timestamps[-1] - self.timestamps[0]) if len(self.timestamps) > 1 else 0.0
+            return ClinicalReport(
+                session_id=str(uuid.uuid4()),
+                patient_id=patient_id,
+                timestamp=datetime.now(),
+                instruction=self.instruction,
+                meanASI=self._rehab_rep_count,
+                maxASI=0.0,
+                shoulder_angle_L_mean=avg_form,
+                shoulder_angle_R_mean=0.0,
+                angle_asymmetry=0.0,
+                dominant_freq=None,
+                tremor_amplitude=None,
+                tremor_duration_pct=0.0,
+                transition_duration=duration,
+                transition_velocity=None,
+                stroke_risk=RiskLevel.NORMAL,
+                parkinson_risk=RiskLevel.NORMAL,
+                sarcopenia_risk=RiskLevel.NORMAL,
+                ai_narrative=f"Latihan rehabilitasi selesai. {self._rehab_rep_count} repetisi berhasil dengan skor kualitas {avg_form:.0f}%.",
+            )
 
         # ── 1. Tremor analysis (full session) ──
         wrist = (self.wrist_y_L if len(self.wrist_y_L) >= len(self.wrist_y_R)

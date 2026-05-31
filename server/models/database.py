@@ -142,10 +142,14 @@ class Database:
         completed = self.fetchone("SELECT COUNT(*) FROM sessions WHERE status='completed'")
 
         all_reports = self.fetchall("SELECT report_json FROM reports")
-        referal = monitor = normal = 0
+        referal = monitor = normal = rehab = 0
         for (rj,) in all_reports:
             try:
                 data = json.loads(rj)
+                instr = data.get("instruction", "")
+                if instr.startswith("rehab_"):
+                    rehab += 1
+                    continue
                 risks = data.get("risk_levels", {})
                 if any(v == "referal" for v in risks.values()):
                     referal += 1
@@ -161,4 +165,5 @@ class Database:
             "total_sessions": total_sessions[0] if total_sessions else 0,
             "completed_sessions": completed[0] if completed else 0,
             "risk_distribution": {"referal": referal, "monitor": monitor, "normal": normal},
+            "rehab_sessions": rehab,
         }

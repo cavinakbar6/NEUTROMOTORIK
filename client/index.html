@@ -49,7 +49,11 @@
             </button>
             <button class="nav-item" data-view="assessment" onclick="app.showView('assessment')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><path d="M10 22V18L7 15V11l5-3 5 3v4l-3 3v4"/></svg>
-                <span>Assessment</span>
+                <span>Skrining Klinis (3-in-1)</span>
+            </button>
+            <button class="nav-item" data-view="physiolens" onclick="app.showView('physiolens')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M2 8c0-2.2.7-4.3 2-6"/><path d="M22 8c0-2.2-.7-4.3-2-6"/></svg>
+                <span>Fisioterapi Interaktif (PhysioLens)</span>
             </button>
             <button class="nav-item" data-view="reports" onclick="app.showView('reports')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -126,6 +130,15 @@
                         <span class="stat-label">Referal</span>
                     </div>
                 </div>
+                <div class="stat-card glass">
+                    <div class="stat-icon purple">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-rehab">0</span>
+                        <span class="stat-label">Latihan</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Quick Start -->
@@ -196,6 +209,19 @@
             </div>
         </section>
 
+        <!-- Shared video wrapper — dynamically moved between views by showView() -->
+            <div id="shared-video-wrapper" class="video-wrapper glass" style="display:none">
+                <video id="webcam" autoplay playsinline muted></video>
+                <canvas id="skeleton-canvas"></canvas>
+                <div id="pose-guide" class="pose-guide hidden">
+                    <div class="guide-text" id="guide-text"></div>
+                </div>
+                <div id="status-badge" class="status-overlay normal">
+                    <span class="pulse-dot"></span>
+                    <span id="status-text">Normal</span>
+                </div>
+            </div>
+
         <!-- ═══ ASSESSMENT VIEW ═══════════════════════════════ -->
         <section id="view-assessment" class="view">
             <header class="view-header">
@@ -221,18 +247,8 @@
 
             <div class="assessment-layout">
                 <!-- Left: Video + Skeleton -->
-                <div class="video-column">
-                    <div class="video-wrapper glass">
-                        <video id="webcam" autoplay playsinline muted></video>
-                        <canvas id="skeleton-canvas"></canvas>
-                        <div id="pose-guide" class="pose-guide hidden">
-                            <div class="guide-text" id="guide-text"></div>
-                        </div>
-                        <div id="status-badge" class="status-overlay normal">
-                            <span class="pulse-dot"></span>
-                            <span id="status-text">Normal</span>
-                        </div>
-                    </div>
+                <div class="video-column" id="assessment-camera-slot">
+                    <!-- Shared video wrapper is moved here dynamically by showView() -->
                     <!-- Confidence + Progress -->
                     <div class="progress-confidence-row">
                         <div class="confidence-indicator">
@@ -304,6 +320,115 @@
             </div>
         </section>
 
+        <!-- ═══ PHYSIOLENS VIEW (Gamified Rehab) ═══════════════ -->
+        <section id="view-physiolens" class="view">
+            <header class="view-header">
+                <div>
+                    <h1>PhysioLens — Fisioterapi Interaktif</h1>
+                    <p class="subtitle">Latihan gerak terpandu dengan skor dan penghargaan</p>
+                </div>
+                <div class="assess-controls">
+                    <span class="timer" id="rehab-timer">00:00</span>
+                    <span class="frame-badge" id="rehab-frame-counter">Frame: 0</span>
+                </div>
+            </header>
+
+            <div class="assessment-layout">
+                <!-- Left: Video + Skeleton — shared wrapper moved here dynamically -->
+                <div class="video-column" id="rehab-camera-slot">
+                    <!-- Confidence + Progress -->
+                    <div class="progress-confidence-row">
+                        <div class="confidence-indicator">
+                            <span class="confidence-label">Confidence:</span>
+                            <div class="confidence-track">
+                                <div id="rehab-confidence-fill" class="confidence-fill"></div>
+                            </div>
+                            <span id="rehab-confidence-value" class="confidence-value">0%</span>
+                        </div>
+                        <div class="progress-wrapper">
+                            <div class="progress-track">
+                                <div id="rehab-progress-bar" class="progress-fill"></div>
+                            </div>
+                            <span id="rehab-progress-text" class="progress-label">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: PhysioLens Gamification Panel -->
+                <div class="metrics-column">
+                    <!-- Rep Counter -->
+                    <div class="metric-card glass rehab-counter-card">
+                        <div class="mc-header">
+                            <h3>Repetisi</h3>
+                            <span class="mc-badge normal" id="rehab-rep-badge">Mulai</span>
+                        </div>
+                        <div class="rehab-rep-display">
+                            <span class="rehab-rep-count" id="rehab-rep-count">0</span>
+                            <span class="rehab-rep-divider">/</span>
+                            <span class="rehab-rep-target" id="rehab-rep-target">10</span>
+                        </div>
+                        <div class="rehab-rep-bar-track">
+                            <div class="rehab-rep-bar-fill" id="rehab-rep-bar"></div>
+                        </div>
+                    </div>
+
+                    <!-- Form Score -->
+                    <div class="metric-card glass">
+                        <div class="mc-header">
+                            <h3>Kualitas Gerakan</h3>
+                            <span class="mc-badge normal" id="rehab-form-badge">Bagus!</span>
+                        </div>
+                        <div class="rehab-form-display">
+                            <div class="rehab-form-bar-track">
+                                <div class="rehab-form-bar-fill" id="rehab-form-bar"></div>
+                            </div>
+                            <span class="rehab-form-score" id="rehab-form-score">0%</span>
+                        </div>
+                    </div>
+
+                    <!-- Feedback Message -->
+                    <div class="metric-card glass rehab-feedback-card">
+                        <div class="mc-header"><h3>Panduan Gerakan</h3></div>
+                        <div class="rehab-feedback-text" id="rehab-feedback">Siap untuk memulai?</div>
+                    </div>
+
+                    <!-- Gamification Badges -->
+                    <div class="metric-card glass rehab-badge-card">
+                        <div class="mc-header"><h3>Penghargaan</h3></div>
+                        <div class="rehab-badges" id="rehab-badges">
+                            <div class="rehab-badge locked" id="badge-first" title="Repetisi Pertama">🌟</div>
+                            <div class="rehab-badge locked" id="badge-perfect" title="Form Sempurna">🏆</div>
+                            <div class="rehab-badge locked" id="badge-5reps" title="5 Repetisi">💪</div>
+                            <div class="rehab-badge locked" id="badge-10reps" title="10 Repetisi">🎯</div>
+                        </div>
+                    </div>
+
+                    <!-- Rehab Controls -->
+                    <div class="rehab-start-panel glass">
+                        <div class="form-group">
+                            <label>Latihan</label>
+                            <select id="rehab-instruction-select">
+                                <option value="rehab_arm_raise">Angkat Tangan — Rehabilitasi Bahu</option>
+                                <option value="rehab_squat">Jongkok &amp; Berdiri — Rehabilitasi Kaki</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Target Repetisi</label>
+                            <input type="number" id="rehab-target-reps" value="10" min="3" max="30">
+                        </div>
+                        <button class="btn btn-primary btn-lg rehab-start-btn" id="btn-rehab-start" onclick="app.startRehab()">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            Mulai Latihan
+                        </button>
+                        <button class="btn btn-danger btn-lg rehab-stop-btn" id="btn-rehab-stop" onclick="app.stopRehab()" style="display:none">
+                            Selesai
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
         <!-- ═══ REPORTS VIEW ══════════════════════════════════ -->
         <section id="view-reports" class="view">
             <header class="view-header">
@@ -346,6 +471,10 @@
     <script src="js/skeleton-renderer.js?v=2"></script>
     <script src="js/chart-manager.js?v=2"></script>
     <script src="js/main.js?v=12"></script>
+
+
+    <!-- Confetti overlay container -->
+    <div id="confetti-container" class="confetti-container"></div>
 
 </body>
 </html>

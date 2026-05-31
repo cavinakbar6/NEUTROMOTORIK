@@ -99,10 +99,10 @@ body {
 
 .sidebar-nav {
     flex: 1;
-    padding: 12px;
+    padding: 14px 12px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
 }
 
 .nav-item {
@@ -119,6 +119,7 @@ body {
     cursor: pointer;
     transition: all .2s ease;
     font-family: inherit;
+    white-space: nowrap;
 }
 .nav-item:hover { background: rgba(16, 185, 129, 0.08); color: var(--text-primary); }
 .nav-item.active {
@@ -202,6 +203,7 @@ body {
     -webkit-backdrop-filter: blur(20px);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .card { border-radius: var(--radius-lg); padding: 24px; }
@@ -211,11 +213,10 @@ body {
 /* ═══ STATS ROW ═════════════════════════════════════════════ */
 .stats-row {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 14px;
     margin-bottom: 24px;
 }
-@media (max-width: 1100px) { .stats-row { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 700px) { .stats-row { grid-template-columns: repeat(2, 1fr); } }
 
 .stat-card {
@@ -226,6 +227,7 @@ body {
     transition: transform .2s, box-shadow .2s;
 }
 .stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-glow); }
+.stat-card:active { transform: translateY(0); }
 
 /* Evidence Info */
 .evidence-info { margin-top: 24px; }
@@ -235,15 +237,8 @@ body {
 .evidence-content strong { display: block; font-size: 13px; color: var(--text-primary); margin-bottom: 2px; }
 .evidence-content p { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
 
-/* Confidence indicator */
-.progress-confidence-row { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
-.confidence-indicator { display: flex; align-items: center; gap: 10px; }
-.confidence-label { font-size: 11px; color: var(--text-muted); min-width: 70px; }
-.confidence-track { flex: 1; height: 4px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden; }
-.confidence-fill { height: 100%; background: linear-gradient(90deg, var(--green), var(--blue)); width: 0%; transition: width .3s; }
-.confidence-value { font-size: 11px; color: var(--text-secondary); min-width: 35px; text-align: right; }
-
 /* ═══ FORMS ═════════════════════════════════════════════════ */
+.stat-icon {
     width: 42px; height: 42px;
     border-radius: var(--radius);
     display: flex;
@@ -382,11 +377,12 @@ body {
     grid-template-columns: 1fr 380px;
     gap: 20px;
     height: calc(100vh - 160px);
+    align-items: start;
 }
 @media (max-width: 1000px) { .assessment-layout { grid-template-columns: 1fr; height: auto; } }
 
 /* ── Video ── */
-.video-column { display: flex; flex-direction: column; gap: 10px; }
+.video-column { display: flex; flex-direction: column; gap: 12px; }
 .video-wrapper {
     position: relative;
     background: #000;
@@ -447,6 +443,7 @@ body {
     display: flex;
     gap: 16px;
     align-items: center;
+    padding: 0 4px;
 }
 
 .confidence-indicator {
@@ -521,12 +518,12 @@ body {
     padding-right: 4px;
 }
 
-.metric-card { padding: 16px; }
+.metric-card { padding: 18px; }
 .mc-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
 }
 .mc-header h3 {
     font-size: 11px;
@@ -774,4 +771,220 @@ body {
     .view { padding: 16px; }
     .form-grid { flex-direction: column; }
     .evidence-grid { grid-template-columns: 1fr; }
+}
+
+/* ═══ PHYSIOLENS — GAMIFIED REHAB UI ═══════════════════════ */
+.rehab-counter-card {
+    text-align: center;
+    background: linear-gradient(135deg, rgba(16,185,129,0.08), rgba(59,130,246,0.05)) !important;
+}
+
+.rehab-rep-display {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px;
+    padding: 16px 0 8px;
+}
+
+.rehab-rep-count {
+    font-size: 96px;
+    font-weight: 900;
+    line-height: 1;
+    background: linear-gradient(135deg, #10b981, #3b82f6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    transition: transform 0.2s ease;
+}
+
+.rehab-rep-count.bump {
+    transform: scale(1.2);
+}
+
+.rehab-rep-divider {
+    font-size: 48px;
+    font-weight: 300;
+    color: var(--text-muted);
+}
+
+.rehab-rep-target {
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--text-secondary);
+}
+
+.rehab-rep-bar-track {
+    width: 100%;
+    height: 8px;
+    background: var(--bg-elevated);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 12px;
+}
+
+.rehab-rep-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--green), var(--blue));
+    border-radius: 4px;
+    transition: width 0.4s ease;
+}
+
+/* Form Score Bar */
+.rehab-form-display {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 0;
+}
+
+.rehab-form-bar-track {
+    flex: 1;
+    height: 12px;
+    background: var(--bg-elevated);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.rehab-form-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--yellow), var(--green));
+    border-radius: 6px;
+    transition: width 0.3s ease;
+}
+
+.rehab-form-score {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--text-primary);
+    min-width: 60px;
+    text-align: right;
+}
+
+/* Feedback Card */
+.rehab-feedback-card {
+    text-align: center;
+    min-height: 80px;
+}
+
+.rehab-feedback-text {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--blue);
+    padding: 12px 0;
+    transition: color 0.3s ease;
+    min-height: 28px;
+}
+
+/* Gamification Badges */
+.rehab-badges {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    padding: 8px 0;
+}
+
+.rehab-badge {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    border-radius: var(--radius);
+    transition: all 0.4s ease;
+    position: relative;
+}
+
+.rehab-badge.locked {
+    background: var(--bg-base);
+    border: 2px dashed var(--border);
+    filter: grayscale(1) opacity(0.4);
+    transform: scale(0.9);
+}
+
+.rehab-badge.unlocked {
+    background: linear-gradient(135deg, rgba(16,185,129,0.15), rgba(59,130,246,0.1));
+    border: 2px solid var(--blue);
+    filter: none;
+    transform: scale(1);
+    box-shadow: 0 0 16px rgba(16,185,129,0.3);
+}
+
+.rehab-badge.pop {
+    animation: badgePop 0.6s ease;
+}
+
+@keyframes badgePop {
+    0% { transform: scale(0.5); opacity: 0; }
+    50% { transform: scale(1.3); }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+/* Rehab Start Panel */
+.rehab-start-panel {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.rehab-start-btn,
+.rehab-stop-btn {
+    width: 100%;
+    justify-content: center;
+}
+
+/* Pulse animation for rep increments */
+@keyframes repGlow {
+    0% { box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
+    70% { box-shadow: 0 0 0 20px rgba(16,185,129,0); }
+    100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+}
+
+.rehab-counter-card.pulse {
+    animation: repGlow 0.6s ease-out;
+}
+
+/* Confetti */
+.confetti-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+    overflow: hidden;
+}
+
+.confetti-piece {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    animation: confettiFall 1.5s ease-out forwards;
+}
+
+@keyframes confettiFall {
+    0% {
+        transform: translateY(-20px) rotate(0deg) scale(1);
+        opacity: 1;
+    }
+    100% {
+        transform: translateY(100vh) rotate(720deg) scale(0.3);
+        opacity: 0;
+    }
+}
+
+/* Milestone flash */
+@keyframes milestoneFlash {
+    0%, 100% { background: var(--bg-glass); }
+    50% { background: rgba(16,185,129,0.2); }
+}
+
+.rehab-counter-card.milestone {
+    animation: milestoneFlash 0.5s ease 2;
 }

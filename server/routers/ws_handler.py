@@ -131,6 +131,12 @@ async def ws_stream(ws: WebSocket):
 
                     metrics = engine.process_frame(frame, timestamp, landmarks)
 
+                    # In rehab mode, send RehabMetrics instead of KinematicMetrics
+                    if engine._is_rehab:
+                        rehab_metrics = engine.process_rehab_frame(frame, timestamp, landmarks)
+                        await ws.send_text(json.dumps(rehab_metrics.model_dump()))
+                        continue
+
                     # Tentukan apakah perlu kirim alert
                     alert_type = None
                     if metrics.ASI is not None and metrics.ASI > 0.15:

@@ -19,6 +19,14 @@ const app = {
     seqReports: [], seqResults: [],
     // Alert state
     alertAudio: null, alertThrottle: {},
+    // PhysioLens rehab state
+    isRehab: false,
+    rehabPrevRepCount: 0,
+    rehabUnlockedBadges: { first: false, perfect: false, reps5: false, reps10: false },
+    rehabSkeleton: null,
+    rehabPose: null,
+    rehabCamera: null,
+    rehabMediaStream: null,
 };
 
 app.SEQUENCE = [
@@ -42,6 +50,7 @@ function initWebSocket() {
     };
     app.ws.onMetrics = handleMetrics;
     app.ws.onReport = handleReport;
+    app.ws.onRehabMetrics = handleRehabMetrics;
     app.ws.onAck = (a) => { app.sessionId = a.session_id; };
     app.ws.onError = (m) => console.warn("[WS]", m);
     app.ws.connect();
@@ -113,6 +122,16 @@ app.showView = function(name) {
     if (ve) ve.classList.add("active");
     const nb = document.querySelector(`.nav-item[data-view="${name}"]`);
     if (nb) nb.classList.add("active");
+    // Move shared video wrapper into active view's camera slot
+    const vw = document.getElementById("shared-video-wrapper");
+    if (vw) {
+        vw.style.display = "";
+        let slot = null;
+        if (name === "assessment") slot = document.getElementById("assessment-camera-slot");
+        else if (name === "physiolens") slot = document.getElementById("rehab-camera-slot");
+        else vw.style.display = "none";
+        if (slot) slot.prepend(vw);
+    }
 };
 
 // ═══ Stats ═════════════════════════════════════════════════
@@ -126,6 +145,7 @@ async function loadStats() {
         setText("stat-normal", s.risk_distribution?.normal || 0);
         setText("stat-monitor", s.risk_distribution?.monitor || 0);
         setText("stat-referal", s.risk_distribution?.referal || 0);
+        setText("stat-rehab", s.rehab_sessions || 0);
     } catch (e) { console.warn("Stats:", e); }
 }
 
@@ -207,6 +227,37 @@ function handleReport(report) {
 }
 
 function displayReport(report, isAggregated) {
+    // ── Rehab reports: render simplified gamification card ──
+    if (report.instruction && report.instruction.startsWith("rehab_")) {
+        const el = document.getElementById("report-content");
+        const empty = document.getElementById("report-empty");
+        if (!el || !empty) return;
+        empty.style.display = "none";
+        el.style.display = "flex";
+        const label = report.instruction_label || (report.instruction === "rehab_arm_raise" ? "Angkat Tangan" : "Jongkok & Berdiri");
+        const scoreVal = report.score != null ? report.score : 0;
+        const repsVal = report.reps != null ? report.reps : 0;
+        const durVal = report.duration_s != null ? report.duration_s.toFixed(1) : "-";
+        speakInstruction(report.narrative || "Latihan selesai.", true);
+        el.innerHTML = `
+            <div class="risk-card glass" style="text-align:center;padding:32px">
+                <div style="font-size:16px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">${label}</div>
+                <div style="font-size:64px;font-weight:900;background:linear-gradient(135deg,#10b981,#3b82f6);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${repsVal} Repetisi</div>
+                <div style="font-size:18px;color:var(--text-secondary);margin-top:8px">Skor Kualitas: <strong>${Math.round(scoreVal)}%</strong></div>
+                <div style="font-size:13px;color:var(--text-muted);margin-top:4px">Durasi: ${durVal}s</div>
+            </div>
+            <div class="card glass" style="text-align:center;padding:20px">
+                <div class="risk-label">REKOMENDASI</div>
+                <p style="color:var(--text-secondary);line-height:1.6;margin-top:8px">${report.recommendation || ""}</p>
+            </div>
+            <div class="report-narrative glass"><div class="card-header"><h2>Ringkasan</h2></div><pre style="font-size:13px;line-height:1.6;color:var(--text-secondary)">${report.narrative || ""}</pre></div>
+            <div style="text-align:center;padding:16px 0;display:flex;gap:12px;justify-content:center">
+                <button class="btn btn-primary" onclick="app.showView('dashboard');loadStats()">Kembali</button>
+            </div>
+        `;
+        return;
+    }
+
     const rl = report.risk_levels || {};
     
     // Construct doctor-like speech
@@ -474,6 +525,235 @@ function handleMetrics(m) {
     }
 }
 
+
+// ═══ PhysioLens — Rehab Mode ═════════════════════════════════
+app.startRehab = async function() {
+    const inst = document.getElementById("rehab-instruction-select").value;
+    const targetReps = parseInt(document.getElementById("rehab-target-reps").value) || 10;
+    const pid = document.getElementById("patient-id")?.value || `PT-${Date.now()}`;
+    const age = document.getElementById("patient-age")?.value || null;
+    app.isRehab = true;
+    app.isRecording = true;
+    app.rehabPrevRepCount = 0;
+    app.rehabUnlockedBadges = { first: false, perfect: false, reps5: false, reps10: false };
+    app.frameCount = 0;
+    app.startTimestamp = performance.now() / 1000;
+
+    // Reset confidence UI
+    const cf = document.getElementById("confidence-fill"), cv = document.getElementById("confidence-value");
+    if (cf) cf.style.width = "0%";
+    if (cv) cv.textContent = "0%";
+
+    // Reset UI
+    setText("rehab-rep-count", "0");
+    setText("rehab-form-score", "0%");
+    setText("rehab-feedback", inst === "rehab_arm_raise" ? "Angkat tangan setinggi mungkin!" : "Jongkok perlahan lalu berdiri!");
+    setText("rehab-rep-target", targetReps);
+    setText("status-text", "Merekam");
+    document.getElementById("rehab-rep-bar").style.width = "0%";
+    document.getElementById("rehab-form-bar").style.width = "0%";
+
+    // Reset badges to locked
+    ["badge-first","badge-perfect","badge-5reps","badge-10reps"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.className = "rehab-badge locked";
+    });
+
+    // Toggle buttons
+    document.getElementById("btn-rehab-start").style.display = "none";
+    document.getElementById("btn-rehab-stop").style.display = "flex";
+    const sbadge = document.getElementById("status-badge");
+    if (sbadge) sbadge.className = "status-overlay normal";
+
+    // Start WebSocket session
+    app.ws.startSession(pid, inst, age);
+
+    // Init skeleton renderer for rehab view — uses shared webcam/canvas
+    const ve = document.getElementById("webcam");
+    const ce = document.getElementById("skeleton-canvas");
+    app.rehabSkeleton = new SkeletonRenderer(ve, ce);
+
+    // Start MediaPipe for rehab
+    const pose = new Pose({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
+    pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+    pose.onResults((r) => {
+        if (!app.isRecording || !app.isRehab) return;
+        app.fpsCounter++;
+        if (!r.poseLandmarks || r.poseLandmarks.length === 0) return;
+        const lms = r.poseLandmarks.map((lm, i) => ({ id: i, x: lm.x, y: lm.y, z: lm.z, vis: lm.visibility !== undefined ? lm.visibility : 1.0 }));
+        app.rehabSkeleton.draw(lms, app._localAngles);
+        app.frameCount++;
+        app.ws.sendLandmarks(app.frameCount, performance.now() / 1000, lms);
+    });
+    await pose.initialize();
+    app.rehabPose = pose;
+
+    try {
+        if (!window.Camera) throw new Error("CameraUtils not loaded");
+        app.rehabCamera = new Camera(ve, {
+            onFrame: async () => { if (app.isRecording && app.isRehab && app.rehabPose) await app.rehabPose.send({ image: ve }); },
+            width: 640, height: 480
+        });
+        await app.rehabCamera.start();
+    } catch (e) {
+        console.error("Rehab Camera:", e);
+        alert("Tidak dapat mengakses kamera: " + e.message);
+        app.stopRehab();
+        return;
+    }
+
+    speakInstruction(inst === "rehab_arm_raise" ? "Latihan angkat tangan. Silakan angkat tangan setinggi mungkin." : "Latihan jongkok. Jongkok perlahan lalu berdiri kembali.", true);
+    updateRehabTimer(120000);
+};
+
+function updateRehabTimer(maxMs) {
+    if (!app.isRecording || !app.isRehab) return;
+    const elapsed = performance.now() - app.startTimestamp * 1000;
+    const mins = Math.floor(elapsed / 60000).toString().padStart(2, "0");
+    const secs = Math.floor((elapsed % 60000) / 1000).toString().padStart(2, "0");
+    setText("rehab-timer", `${mins}:${secs}`);
+    setText("rehab-frame-counter", `Frame: ${app.frameCount}`);
+    const pct = Math.min(100, (elapsed / maxMs) * 100);
+    const bar = document.getElementById("rehab-progress-bar");
+    const label = document.getElementById("rehab-progress-text");
+    if (bar) bar.style.width = pct + "%";
+    if (label) label.textContent = Math.round(pct) + "%";
+    requestAnimationFrame(() => updateRehabTimer(maxMs));
+}
+
+app.stopRehab = function() {
+    app.isRehab = false;
+    app.isRecording = false;
+    if (app.rehabCamera) { try { app.rehabCamera.stop(); } catch(e) {} app.rehabCamera = null; }
+    if (app.mediaStream) { app.mediaStream.getTracks().forEach(t => t.stop()); app.mediaStream = null; }
+    if (app.rehabPose) { try { app.rehabPose.close(); } catch(e) {} app.rehabPose = null; }
+    if (app.rehabSkeleton) app.rehabSkeleton.clear();
+    const ve = document.getElementById("webcam"); if (ve) ve.srcObject = null;
+    if (app.sessionId) app.ws.endSession(app.sessionId);
+    document.getElementById("btn-rehab-start").style.display = "flex";
+    document.getElementById("btn-rehab-stop").style.display = "none";
+    const badge = document.getElementById("status-badge");
+    const stxt = document.getElementById("status-text");
+    if (badge) badge.className = "status-overlay normal";
+    if (stxt) stxt.textContent = "Selesai";
+    setText("rehab-feedback", "Latihan selesai! Semangat terus!");
+    speakInstruction("Latihan selesai. Bagus sekali!", true);
+};
+
+function handleRehabMetrics(m) {
+    const count = m.rep_count || 0;
+    const formScore = m.form_score || 0;
+    const target = m.target_reps || 10;
+    const feedback = m.feedback_msg || "";
+
+    // Rep counter with bump animation on increment
+    const repEl = document.getElementById("rehab-rep-count");
+    const prevCount = app.rehabPrevRepCount;
+    if (count > prevCount) {
+        if (repEl) {
+            repEl.textContent = count;
+            repEl.classList.add("bump");
+            setTimeout(() => repEl.classList.remove("bump"), 200);
+        }
+        playBeep(880, 0.15);
+        // Milestone TTS every 5 reps
+        if (count % 5 === 0 && count > 0) {
+            const messages = {
+                5: "Luar biasa, lima repetisi berhasil!",
+                10: "Hebat, sepuluh repetisi berhasil!",
+                15: "Luar biasa, lima belas repetisi!",
+                20: "Sempurna, dua puluh repetisi!",
+            };
+            speakInstruction(messages[count] || `${count} repetisi berhasil!`, true);
+            spawnConfetti();
+            const card = document.querySelector(".rehab-counter-card");
+            if (card) { card.classList.add("milestone"); setTimeout(() => card.classList.remove("milestone"), 1500); }
+        }
+    } else if (repEl) {
+        repEl.textContent = count;
+    }
+    app.rehabPrevRepCount = count;
+
+    setText("rehab-rep-target", target);
+    const repBar = document.getElementById("rehab-rep-bar");
+    if (repBar) repBar.style.width = Math.min(100, (count / target) * 100) + "%";
+
+    const repBadge = document.getElementById("rehab-rep-badge");
+    if (repBadge) {
+        if (count >= target) { repBadge.textContent = "Selesai!"; repBadge.className = "mc-badge normal"; }
+        else if (count >= target * 0.5) { repBadge.textContent = "Hampir!"; repBadge.className = "mc-badge warning"; }
+        else { repBadge.textContent = "Mulai"; repBadge.className = "mc-badge normal"; }
+    }
+
+    // Form score
+    const formBar = document.getElementById("rehab-form-bar");
+    const formScoreEl = document.getElementById("rehab-form-score");
+    const formBadge = document.getElementById("rehab-form-badge");
+    if (formBar) formBar.style.width = formScore + "%";
+    if (formScoreEl) formScoreEl.textContent = Math.round(formScore) + "%";
+    if (formBadge) {
+        if (formScore >= 85) formBadge.textContent = "Sempurna!";
+        else if (formScore >= 60) formBadge.textContent = "Bagus!";
+        else if (formScore >= 30) formBadge.textContent = "Cukup";
+        else formBadge.textContent = "Perbaiki";
+    }
+
+    setText("rehab-feedback", feedback);
+
+    // Confidence from form score
+    const conf = Math.min(1.0, formScore / 100);
+    const ce = document.getElementById("rehab-confidence-value");
+    const cb = document.getElementById("rehab-confidence-fill");
+    if (ce) ce.textContent = Math.round(conf * 100) + "%";
+    if (cb) cb.style.width = Math.round(conf * 100) + "%";
+
+    // Status badge (shared with clinical mode)
+    const sbadge = document.getElementById("status-badge");
+    const stxt = document.getElementById("status-text");
+    if (sbadge && stxt) {
+        if (formScore >= 85) { sbadge.className = "status-overlay normal"; stxt.textContent = "Sempurna"; }
+        else if (formScore >= 60) { sbadge.className = "status-overlay normal"; stxt.textContent = "Bagus"; }
+        else { sbadge.className = "status-overlay warning"; stxt.textContent = "Perbaiki"; }
+    }
+
+    // Badge unlocking
+    unlockRehabBadge("first", "badge-first", count >= 1);
+    unlockRehabBadge("perfect", "badge-perfect", formScore >= 85);
+    unlockRehabBadge("5reps", "badge-5reps", count >= 5);
+    unlockRehabBadge("10reps", "badge-10reps", count >= target);
+
+    // Auto-complete at target
+    if (count >= target && app.isRehab && app.isRecording) {
+        speakInstruction("Selamat! Target tercapai!", true);
+        spawnConfetti();
+        setTimeout(() => app.stopRehab(), 2000);
+    }
+}
+
+function unlockRehabBadge(key, elementId, condition) {
+    if (condition && !app.rehabUnlockedBadges[key]) {
+        app.rehabUnlockedBadges[key] = true;
+        const el = document.getElementById(elementId);
+        if (el) el.className = "rehab-badge unlocked pop";
+    }
+}
+
+function spawnConfetti() {
+    const container = document.getElementById("confetti-container");
+    if (!container) return;
+    const colors = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"];
+    for (let i = 0; i < 40; i++) {
+        const piece = document.createElement("div");
+        piece.className = "confetti-piece";
+        piece.style.left = Math.random() * 100 + "%";
+        piece.style.top = "-10px";
+        piece.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+        piece.style.animationDelay = (Math.random() * 0.5) + "s";
+        piece.style.animationDuration = (1 + Math.random()) + "s";
+        container.appendChild(piece);
+        setTimeout(() => piece.remove(), 2500);
+    }
+}
 // ═══ Stop ══════════════════════════════════════════════════
 app.stopAssessment = function() {
     app.isRecording = false;
