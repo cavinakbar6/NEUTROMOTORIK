@@ -97,7 +97,7 @@ class ReportGenerator:
 
     @staticmethod
     def _recommendation(r: ClinicalReport) -> str:
-        if any(x == RiskLevel.REFERAL for x in [r.stroke_risk, r.parkinson_risk, r.sarcopenia_risk]):
+        if any(x == RiskLevel.REFERRAL for x in [r.stroke_risk, r.parkinson_risk, r.sarcopenia_risk]):
             return "REKOMENDASI: Rujukan klinis — segera konsultasikan dengan dokter spesialis."
         if any(x == RiskLevel.MONITOR for x in [r.stroke_risk, r.parkinson_risk, r.sarcopenia_risk]):
             return "REKOMENDASI: Monitoring — assessment ulang dalam 1-3 bulan."
@@ -110,7 +110,7 @@ class ReportGenerator:
 
         # Stroke
         lines.append(f"\n[Asimetri] ASI: {r.meanASI:.3f} | Sudut L: {r.shoulder_angle_L_mean:.1f}° | R: {r.shoulder_angle_R_mean:.1f}°")
-        if r.stroke_risk == RiskLevel.REFERAL:
+        if r.stroke_risk == RiskLevel.REFERRAL:
             lines.append(f"  → Indikasi asimetri signifikan. Rujukan neurologis direkomendasikan.")
         elif r.stroke_risk == RiskLevel.MONITOR:
             lines.append(f"  → Asimetri ringan. Monitoring berkala direkomendasikan.")
@@ -120,7 +120,7 @@ class ReportGenerator:
         # Parkinson
         if r.dominant_freq:
             lines.append(f"\n[Tremor] Freq: {r.dominant_freq:.1f} Hz | Amplitudo: {r.tremor_amplitude:.4f} | Durasi: {r.tremor_duration_pct*100:.0f}%")
-            if r.parkinson_risk == RiskLevel.REFERAL:
+            if r.parkinson_risk == RiskLevel.REFERRAL:
                 lines.append(f"  → Pola tremor patologis terdeteksi. Evaluasi neurologis direkomendasikan.")
             elif r.parkinson_risk == RiskLevel.MONITOR:
                 lines.append(f"  → Aktivitas frekuensi transisi. Monitoring direkomendasikan.")
@@ -130,7 +130,7 @@ class ReportGenerator:
         # Sarcopenia
         if r.transition_duration:
             lines.append(f"\n[Sit-to-Stand] Durasi: {r.transition_duration:.2f}s")
-            if r.sarcopenia_risk == RiskLevel.REFERAL:
+            if r.sarcopenia_risk == RiskLevel.REFERRAL:
                 lines.append(f"  → Transisi lambat. Evaluasi komposisi tubuh direkomendasikan.")
             elif r.sarcopenia_risk == RiskLevel.MONITOR:
                 lines.append(f"  → Durasi di batas atas normal.")

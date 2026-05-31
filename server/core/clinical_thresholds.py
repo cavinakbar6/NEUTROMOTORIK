@@ -40,12 +40,12 @@ class StrokeThresholds:
     # ASI (Asymmetry Index: 2*|L-R|/(L+R))
     asi_normal_max: float = 0.08      # ≤ 0.08 → NORMAL (healthy mean ± 2SD)
     asi_monitor_max: float = 0.15     # 0.08-0.15 → MONITOR
-    # > 0.15 → REFERAL
+    # > 0.15 → REFERRAL
 
     # Angle asymmetry (degrees)
     angle_normal_max: float = 6.0     # ≤ 6° → NORMAL
     angle_monitor_max: float = 12.0   # 6-12° → MONITOR
-    # > 12° → REFERAL
+    # > 12° → REFERRAL
 
     # Confidence scoring weights
     weight_asi: float = 0.6
@@ -88,12 +88,12 @@ class ParkinsonThresholds:
     # Amplitude thresholds (normalized coordinate units)
     amp_normal_max: float = 0.003     # ≤ 0.003 → NORMAL (physiological)
     amp_monitor_max: float = 0.006    # 0.003-0.006 → MONITOR
-    # > 0.006 → REFERAL (pathological)
+    # > 0.006 → REFERRAL (pathological)
 
     # Duration percentage (% of tremor energy / total energy)
     pct_normal_max: float = 0.15      # ≤ 15% → NORMAL
     pct_monitor_max: float = 0.35     # 15-35% → MONITOR
-    # > 35% → REFERAL
+    # > 35% → REFERRAL
 
     # Scoring weights
     weight_freq: float = 0.3         # Is frequency in Parkinsonian zone?
@@ -118,7 +118,7 @@ class STSAgeGroup:
     age_min: int
     age_max: int
     normal_max_s: float       # ≤ ini → NORMAL
-    monitor_max_s: float      # ≤ ini → MONITOR, > ini → REFERAL
+    monitor_max_s: float      # ≤ ini → MONITOR, > ini → REFERRAL
 
 
 @dataclass(frozen=True)

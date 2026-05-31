@@ -15,10 +15,14 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from core.kinematic_engine import KinematicEngine
 from core.session_manager import SessionManager
+from models.database import Database
 from models.schemas import Landmark
 
 router = APIRouter()
 session_mgr = SessionManager()
+db = Database()
+
+LANDMARKS_BUFFER_INTERVAL = 30
 
 
 @router.websocket("/stream")
@@ -32,6 +36,7 @@ async def ws_stream(ws: WebSocket):
     is_sequential = False
     sequential_reports = []
     instruction = "raise_hands"
+    landmarks_buffer = []
 
     # ── Sequential Assessment: START ──
     if False:
@@ -146,6 +151,15 @@ async def ws_stream(ws: WebSocket):
 
                     # Kirim metrik
                     metrics_dict = metrics.model_dump()
+
+                    # Attach calibration status if available
+                    cal_result = engine.calibrator._result
+                    if cal_result and cal_result.calibrated:
+                        metrics_dict["calibration"] = {
+                            "distance_m": round(cal_result.distance_m, 2),
+                            "confidence": round(cal_result.confidence, 2),
+                        }
+
                     if alert_type:
                         metrics_dict["alert"] = alert_type
                         # Kirim sebagai message terpisah agar UI bisa flash
@@ -159,6 +173,16 @@ async def ws_stream(ws: WebSocket):
 
                     await ws.send_text(json.dumps(metrics_dict))
 
+                    # Buffer landmarks for replay
+                    landmarks_buffer.append({
+                        "frame_number": frame,
+                        "timestamp": timestamp,
+                        "landmarks_json": json.dumps([lm.model_dump() for lm in landmarks]),
+                    })
+                    if len(landmarks_buffer) >= LANDMARKS_BUFFER_INTERVAL:
+                        db.save_landmarks_batch(session_id, landmarks_buffer)
+                        landmarks_buffer = []
+
                 except Exception as e:
                     print(f"[WS] Frame error: {e}")
 
@@ -168,6 +192,11 @@ async def ws_stream(ws: WebSocket):
                     continue
 
                 try:
+                    # Flush remaining buffered landmarks before finalizing
+                    if session_id and landmarks_buffer:
+                        db.save_landmarks_batch(session_id, landmarks_buffer)
+                        landmarks_buffer = []
+
                     report = engine.finalize(patient_id=patient_id)
                     formatted = session_mgr.save_report(report, session_id)
 
@@ -236,7 +265,7 @@ def _aggregate_sequential_reports(reports: list, patient_id: str) -> dict:
     sarc_risks = [r.get("risk_levels", {}).get("sarcopenia", "normal") for r in reports]
 
     def worst(risk_list):
-        if "referal" in risk_list: return "referal"
+        if "referral" in risk_list: return "referral"
         if "monitor" in risk_list: return "monitor"
         return "normal"
 
@@ -250,11 +279,11 @@ def _aggregate_sequential_reports(reports: list, patient_id: str) -> dict:
     timestamp = datetime.now().isoformat()
 
     recommendation = ""
-    if worst(stroke_risks) == "referal":
+    if worst(stroke_risks) == "referral":
         recommendation = "REKOMENDASI: Rujukan neurologist — indikasi stroke ringan / TIA."
-    elif worst(park_risks) == "referal":
+    elif worst(park_risks) == "referral":
         recommendation = "REKOMENDASI: Rujukan neurologist — indikasi tremor patologis (Parkinson)."
-    elif worst(sarc_risks) == "referal":
+    elif worst(sarc_risks) == "referral":
         recommendation = "REKOMENDASI: Rujukan geriatri — indikasi sarcopenia (penurunan massa otot)."
     elif worst(stroke_risks) == "monitor" or worst(park_risks) == "monitor" or worst(sarc_risks) == "monitor":
         recommendation = "REKOMENDASI: Monitoring lanjutan — beberapa parameter di batas atas normal."

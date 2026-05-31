@@ -28,7 +28,7 @@ class RiskClassifier:
 
         Returns: (risk_level, confidence, detail_dict)
         """
-        # Compute sub-scores (0.0 = normal, 0.5 = monitor, 1.0 = referal)
+        # Compute sub-scores (0.0 = normal, 0.5 = monitor, 1.0 = referral)
         if mean_asi > STROKE.asi_monitor_max:
             asi_score = 1.0
         elif mean_asi > STROKE.asi_normal_max:
@@ -59,7 +59,7 @@ class RiskClassifier:
 
         # Classify
         if composite >= 0.7:
-            risk = RiskLevel.REFERAL
+            risk = RiskLevel.REFERRAL
         elif composite >= 0.35:
             risk = RiskLevel.MONITOR
         else:
@@ -136,7 +136,7 @@ class RiskClassifier:
 
         # Classify
         if composite >= 0.65:
-            risk = RiskLevel.REFERAL
+            risk = RiskLevel.REFERRAL
         elif composite >= 0.30:
             risk = RiskLevel.MONITOR
         else:
@@ -172,7 +172,7 @@ class RiskClassifier:
         group = SARCOPENIA.get_thresholds(age)
 
         if transition_duration > group.monitor_max_s:
-            risk = RiskLevel.REFERAL
+            risk = RiskLevel.REFERRAL
         elif transition_duration > group.normal_max_s:
             risk = RiskLevel.MONITOR
         else:

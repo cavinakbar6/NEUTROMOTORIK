@@ -11,15 +11,15 @@ from enum import Enum
 # ─── Enums ──────────────────────────────────────────────
 
 class RiskLevel(str, Enum):
-    NORMAL  = "normal"
-    MONITOR = "monitor"
-    REFERAL = "referal"
+    NORMAL   = "normal"
+    MONITOR  = "monitor"
+    REFERRAL = "referral"
 
 
 class InstructionType(str, Enum):
-    RAISE_HANDS   = "raise_hands"
-    STAND_STILL   = "stand_still"
-    SIT_TO_STAND  = "sit_to_stand"
+    RAISE_HANDS     = "raise_hands"
+    STAND_STILL     = "stand_still"
+    SIT_TO_STAND    = "sit_to_stand"
     REHAB_ARM_RAISE = "rehab_arm_raise"
     REHAB_SQUAT     = "rehab_squat"
 

@@ -17,8 +17,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routers.ws_handler import router as ws_router
 from routers.api_routes import router as api_router
+from routers.auth_routes import router as auth_router
 from routers.health import router as health_router
 from routers.tts_handler import router as tts_router
+from routers.simulation_routes import router as sim_router
 from config import HOST, PORT
 
 # ── Path Setup ───────────────────────────────────────────
@@ -62,8 +64,10 @@ app.add_middleware(
 # Routers
 app.include_router(health_router, prefix="/health", tags=["Health"])
 app.include_router(ws_router, prefix="/ws", tags=["WebSocket"])
+app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(api_router, prefix="/api", tags=["API"])
 app.include_router(tts_router, prefix="/api", tags=["TTS"])
+app.include_router(sim_router, prefix="/api/sim", tags=["Simulation"])
 
 # Static files (frontend) — harus diakhir
 if CLIENT_DIR.exists():

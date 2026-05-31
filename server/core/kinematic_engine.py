@@ -23,6 +23,7 @@ from core import asymmetry_index as asi_mod
 from core.sit_to_stand import SitToStandDetector
 from core.clinical_thresholds import STROKE, PARKINSON, CONFIDENCE
 from core.risk_classifier import RiskClassifier
+from core.calibration import Calibrator, CalibrationConfig
 
 # ── MediaPipe landmark indices ───────────────────────────
 L_SHOULDER, R_SHOULDER = 11, 12
@@ -47,6 +48,7 @@ class KinematicEngine:
         self.angle_calc = AngleCalculator()
         self.tremor_analyzer = TremorAnalyzer(fps=fps)
         self.sts_detector = SitToStandDetector(fps=fps)
+        self.calibrator = Calibrator()
 
         # Time-series buffers (max 5000 frame = ~167 detik)
         self._max_buffer = 5000
@@ -149,6 +151,20 @@ class KinematicEngine:
         self.frame_count += 1
         pts = self._to_dict(landmarks)
         self.timestamps.append(timestamp)
+
+        # Calibration: accumulate shoulder width for distance normalization
+        self.calibrator.update(landmarks)
+
+        # Apply depth correction to landmark y-coordinates if calibrated
+        if self.calibrator._calibrated:
+            corrected = {}
+            for k, v in pts.items():
+                corrected[k] = np.array([
+                    v[0],
+                    self.calibrator.apply_depth_correction(v[1]),
+                    v[2],
+                ])
+            pts = corrected
 
         m = KinematicMetrics(frame=frame_id)
 

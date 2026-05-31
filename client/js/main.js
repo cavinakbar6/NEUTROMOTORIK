@@ -19,6 +19,8 @@ const app = {
     seqReports: [], seqResults: [],
     // Alert state
     alertAudio: null, alertThrottle: {},
+    // Calibration state
+    calibrator: null,
     // PhysioLens rehab state
     isRehab: false,
     rehabPrevRepCount: 0,
@@ -37,6 +39,10 @@ app.SEQUENCE = [
 
 // ═══ Init ═══════════════════════════════════════════════════
 document.addEventListener("DOMContentLoaded", () => {
+    // Detect font load to prevent FOUT layout shift
+    document.fonts.ready.then(() => {
+        document.documentElement.classList.add("fonts-loaded");
+    });
     initWebSocket(); initFPSCounter(); loadStats();
     initAlertSystem();
 });
@@ -122,15 +128,17 @@ app.showView = function(name) {
     if (ve) ve.classList.add("active");
     const nb = document.querySelector(`.nav-item[data-view="${name}"]`);
     if (nb) nb.classList.add("active");
-    // Move shared video wrapper into active view's camera slot
-    const vw = document.getElementById("shared-video-wrapper");
-    if (vw) {
-        vw.style.display = "";
-        let slot = null;
-        if (name === "assessment") slot = document.getElementById("assessment-camera-slot");
-        else if (name === "physiolens") slot = document.getElementById("rehab-camera-slot");
-        else vw.style.display = "none";
-        if (slot) slot.prepend(vw);
+    
+    // Show/hide video stage using visibility (no DOM movement = no layout shift)
+    const vs = document.getElementById("video-stage");
+    if (vs) {
+        if (name === "assessment" || name === "physiolens") {
+            vs.style.visibility = "visible";
+            vs.style.pointerEvents = "auto";
+        } else {
+            vs.style.visibility = "hidden";
+            vs.style.pointerEvents = "none";
+        }
     }
 };
 
@@ -144,7 +152,7 @@ async function loadStats() {
         setText("stat-sessions", s.total_sessions || 0);
         setText("stat-normal", s.risk_distribution?.normal || 0);
         setText("stat-monitor", s.risk_distribution?.monitor || 0);
-        setText("stat-referal", s.risk_distribution?.referal || 0);
+        setText("stat-referral", s.risk_distribution?.referral || 0);
         setText("stat-rehab", s.rehab_sessions || 0);
     } catch (e) { console.warn("Stats:", e); }
 }
@@ -227,7 +235,7 @@ function handleReport(report) {
 }
 
 function displayReport(report, isAggregated) {
-    // ── Rehab reports: render simplified gamification card ──
+    // ── Rehab reports ──
     if (report.instruction && report.instruction.startsWith("rehab_")) {
         const el = document.getElementById("report-content");
         const empty = document.getElementById("report-empty");
@@ -240,17 +248,17 @@ function displayReport(report, isAggregated) {
         const durVal = report.duration_s != null ? report.duration_s.toFixed(1) : "-";
         speakInstruction(report.narrative || "Latihan selesai.", true);
         el.innerHTML = `
-            <div class="risk-card glass" style="text-align:center;padding:32px">
-                <div style="font-size:16px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">${label}</div>
-                <div style="font-size:64px;font-weight:900;background:linear-gradient(135deg,#10b981,#3b82f6);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${repsVal} Repetisi</div>
-                <div style="font-size:18px;color:var(--text-secondary);margin-top:8px">Skor Kualitas: <strong>${Math.round(scoreVal)}%</strong></div>
-                <div style="font-size:13px;color:var(--text-muted);margin-top:4px">Durasi: ${durVal}s</div>
+            <div class="risk-card" style="text-align:center;padding:32px">
+                <div style="font-size:14px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;font-weight:600">${label}</div>
+                <div style="font-size:56px;font-weight:800;color:var(--primary)">${repsVal} <span style="font-size:24px;font-weight:500">Repetisi</span></div>
+                <div style="font-size:16px;color:var(--text-secondary);margin-top:8px">Skor Kualitas: <strong>${Math.round(scoreVal)}%</strong></div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:4px">Durasi: ${durVal}s</div>
             </div>
-            <div class="card glass" style="text-align:center;padding:20px">
-                <div class="risk-label">REKOMENDASI</div>
+            <div class="card" style="text-align:center;padding:20px">
+                <div class="risk-label">Rekomendasi</div>
                 <p style="color:var(--text-secondary);line-height:1.6;margin-top:8px">${report.recommendation || ""}</p>
             </div>
-            <div class="report-narrative glass"><div class="card-header"><h2>Ringkasan</h2></div><pre style="font-size:13px;line-height:1.6;color:var(--text-secondary)">${report.narrative || ""}</pre></div>
+            <div class="narrative-box"><div class="card-header"><h2>Ringkasan</h2></div><pre style="font-size:13px;line-height:1.6;color:var(--text-secondary)">${report.narrative || ""}</pre></div>
             <div style="text-align:center;padding:16px 0;display:flex;gap:12px;justify-content:center">
                 <button class="btn btn-primary" onclick="app.showView('dashboard');loadStats()">Kembali</button>
             </div>
@@ -260,17 +268,22 @@ function displayReport(report, isAggregated) {
 
     const rl = report.risk_levels || {};
     
+    // Determine worst risk for banner
+    let worstRisk = "normal";
+    if (rl.stroke === "referral" || rl.parkinson === "referral" || rl.sarcopenia === "referral") worstRisk = "referral";
+    else if (rl.stroke === "monitor" || rl.parkinson === "monitor" || rl.sarcopenia === "monitor") worstRisk = "monitor";
+
     // Construct doctor-like speech
     let docSpeech = "Penilaian klinis selesai. Berdasarkan hasil skrining, ";
     let findings = [];
     
-    if (rl.stroke === "referal") findings.push("terdapat asimetri postur yang signifikan, mengindikasikan risiko tinggi gangguan motorik sebelah tubuh");
+    if (rl.stroke === "referral") findings.push("terdapat asimetri postur yang signifikan, mengindikasikan risiko tinggi gangguan motorik sebelah tubuh");
     else if (rl.stroke === "monitor") findings.push("terdapat asimetri ringan yang perlu diobservasi berkala");
     
-    if (rl.parkinson === "referal") findings.push("terdeteksi pola tremor yang berisiko Parkinson");
+    if (rl.parkinson === "referral") findings.push("terdeteksi pola tremor yang berisiko Parkinson");
     else if (rl.parkinson === "monitor") findings.push("terdeteksi indikasi tremor ringan yang perlu diwaspadai");
     
-    if (rl.sarcopenia === "referal") findings.push("kecepatan gerak Anda terdeteksi lambat, mengindikasikan risiko kelemahan otot atau Sarcopenia");
+    if (rl.sarcopenia === "referral") findings.push("kecepatan gerak Anda terdeteksi lambat, mengindikasikan risiko kelemahan otot atau Sarcopenia");
     else if (rl.sarcopenia === "monitor") findings.push("kecepatan gerak Anda berada di ambang batas peringatan, mohon jaga kekuatan otot Anda");
 
     if (findings.length === 0) {
@@ -287,24 +300,23 @@ function displayReport(report, isAggregated) {
     empty.style.display = "none";
     el.style.display = "flex";
 
-    const riskLabel = (r) => r === "referal" ? "REFERAL" : r === "monitor" ? "MONITOR" : "NORMAL";
-    const riskClass = (r) => r === "referal" ? "referal" : r === "monitor" ? "monitor" : "normal";
+    const riskLabel = (r) => r === "referral" ? "REFERRAL" : r === "monitor" ? "MONITOR" : "NORMAL";
+    const riskClass = (r) => r === "referral" ? "referral" : r === "monitor" ? "monitor" : "normal";
 
-    // Calculate overall confidence
     const cs = report.confidence_scores || {};
     const overall = cs.overall || Math.round((cs.stroke || 0 + cs.parkinson || 0 + cs.sarcopenia || 0) / 3 * 100) || 0;
 
     const m = report.metrics || report;
-    const asiInfo = isAggregated ? "See step details" : (m.asymmetry?.meanASI || m.meanASI || "-");
-    const freqInfo = isAggregated ? "See step details" : (m.tremor?.dominant_freq_hz || m.dominant_freq || "-");
-    const stsInfo = isAggregated ? "See step details" : (m.sit_to_stand?.duration_s || m.transition_duration || "-");
+    const asiInfo = isAggregated ? "Lihat detail" : (m.asymmetry?.meanASI || m.meanASI || "-");
+    const freqInfo = isAggregated ? "Lihat detail" : (m.tremor?.dominant_freq_hz || m.dominant_freq || "-");
+    const stsInfo = isAggregated ? "Lihat detail" : (m.sit_to_stand?.duration_s || m.transition_duration || "-");
 
     let stepDetails = "";
     if (isAggregated && app.seqResults.length > 0) {
-        stepDetails = `<div class="card glass" style="margin-top:12px"><div class="card-header"><h2>Detail per Step</h2></div>`;
+        stepDetails = `<div class="card" style="margin-top:12px"><div class="card-header"><h2>Detail per Step</h2></div>`;
         app.seqResults.forEach((r, i) => {
             const srl = r.risk_levels || {};
-            stepDetails += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+            stepDetails += `<div style="padding:8px 0;border-bottom:1px solid var(--border-light)">
                 <strong>Step ${i+1}: ${r.instruction || ""}</strong> — 
                 Stroke: ${riskLabel(srl.stroke)}, Parkinson: ${riskLabel(srl.parkinson)}, Sarcopenia: ${riskLabel(srl.sarcopenia)}
             </div>`;
@@ -312,19 +324,62 @@ function displayReport(report, isAggregated) {
         stepDetails += `</div>`;
     }
 
+    // Primary risk banner
+    const bannerClass = worstRisk === "referral" ? "alert" : worstRisk === "monitor" ? "warning" : "normal";
+    const bannerLabel = worstRisk === "referral" ? "Rujukan Klinis Diperlukan" : worstRisk === "monitor" ? "Monitoring Berkala" : "Hasil Normal";
+
     el.innerHTML = `
-        <div class="report-risks">
-            <div class="risk-card glass"><div class="risk-label">Stroke</div><div class="risk-value ${riskClass(rl.stroke)}">${riskLabel(rl.stroke)}</div><div class="risk-sub">ASI: ${asiInfo}</div></div>
-            <div class="risk-card glass"><div class="risk-label">Parkinson</div><div class="risk-value ${riskClass(rl.parkinson)}">${riskLabel(rl.parkinson)}</div><div class="risk-sub">Freq: ${freqInfo}</div></div>
-            <div class="risk-card glass"><div class="risk-label">Sarcopenia</div><div class="risk-value ${riskClass(rl.sarcopenia)}">${riskLabel(rl.sarcopenia)}</div><div class="risk-sub">Durasi: ${stsInfo}</div></div>
+        <div class="risk-banner ${bannerClass}">
+            <div class="risk-banner-label">Status Skrining</div>
+            <div class="risk-banner-value">${bannerLabel}</div>
+            <div class="risk-banner-sub">Confidence: ${overall}%</div>
         </div>
-        <div class="card glass" style="text-align:center;padding:24px"><div class="risk-label">CONFIDENCE SCORE</div><div style="font-size:48px;font-weight:800;background:linear-gradient(135deg,#3b82f6,#22c55e);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${overall}%</div></div>
+
+        <div class="metrics-grid">
+            <div class="metric-block">
+                <div class="metric-block-label">Stroke</div>
+                <div class="metric-block-value" style="color: ${rl.stroke === 'referral' ? 'var(--critical)' : rl.stroke === 'monitor' ? 'var(--caution)' : '#15803d'}">${riskLabel(rl.stroke)}</div>
+            </div>
+            <div class="metric-block">
+                <div class="metric-block-label">Parkinson</div>
+                <div class="metric-block-value" style="color: ${rl.parkinson === 'referral' ? 'var(--critical)' : rl.parkinson === 'monitor' ? 'var(--caution)' : '#15803d'}">${riskLabel(rl.parkinson)}</div>
+            </div>
+            <div class="metric-block">
+                <div class="metric-block-label">Sarcopenia</div>
+                <div class="metric-block-value" style="color: ${rl.sarcopenia === 'referral' ? 'var(--critical)' : rl.sarcopenia === 'monitor' ? 'var(--caution)' : '#15803d'}">${riskLabel(rl.sarcopenia)}</div>
+            </div>
+        </div>
+
+        <div class="metrics-grid">
+            <div class="metric-block">
+                <div class="metric-block-label">Mean ASI</div>
+                <div class="metric-block-value">${asiInfo}</div>
+            </div>
+            <div class="metric-block">
+                <div class="metric-block-label">Dominant Freq</div>
+                <div class="metric-block-value">${freqInfo} <span class="metric-block-unit">Hz</span></div>
+            </div>
+            <div class="metric-block">
+                <div class="metric-block-label">STS Duration</div>
+                <div class="metric-block-value">${stsInfo} <span class="metric-block-unit">s</span></div>
+            </div>
+        </div>
+
         ${stepDetails}
-        <div class="card glass"><div class="card-header"><h2>Rekomendasi</h2></div><p style="color:var(--text-secondary);line-height:1.6">${report.recommendation || ""}</p></div>
-        <div class="report-narrative glass"><div class="card-header"><h2>Narasi Klinis</h2></div><pre>${report.narrative || ""}</pre></div>
+
+        <div class="recommendation-box">
+            <strong>Rekomendasi</strong>
+            <p>${report.recommendation || ""}</p>
+        </div>
+
+        <div class="narrative-box">
+            <strong>Narasi Klinis</strong>
+            <pre>${report.narrative || ""}</pre>
+        </div>
+
         <div style="text-align:center;padding:16px 0;display:flex;gap:12px;justify-content:center">
             <button class="btn btn-primary" onclick="app.showView('dashboard');loadStats()">Kembali</button>
-            <button class="btn btn-danger btn-sm" onclick="exportPDF()">📄 Download PDF</button>
+            <button class="btn btn-secondary btn-sm" onclick="exportPDF()">Download PDF</button>
         </div>
     `;
 }
@@ -384,6 +439,7 @@ async function startSingleAssessment(opts) {
     app.isRecording = true;
     app.startTimestamp = performance.now() / 1000;
     app._localAngles = { shoulder_angle_L: null, shoulder_angle_R: null };
+    app.calibrator = new Calibrator();
     await initMediaPipe(opts.instruction);
     updateTimer(opts.duration * 1000);
 }
@@ -452,6 +508,7 @@ async function initMediaPipe(instruction) {
         
         app.skeleton.draw(lms, app._localAngles);
         app.frameCount++;
+        if (app.calibrator) app.calibrator.update(lms);
         app.ws.sendLandmarks(app.frameCount, performance.now() / 1000, lms);
     });
     await pose.initialize();
@@ -465,6 +522,9 @@ async function initMediaPipe(instruction) {
 
 // ═══ Metrics Handler ════════════════════════════════════════
 function handleMetrics(m) {
+    // Hanya proses metrics saat sedang di view assessment
+    if (app.currentView !== "assessment") return;
+
     if (m.shoulder_angle_L != null) app._localAngles.shoulder_angle_L = m.shoulder_angle_L;
     if (m.shoulder_angle_R != null) app._localAngles.shoulder_angle_R = m.shoulder_angle_R;
     if (m.ASI != null) { setText("asi-value", m.ASI.toFixed(3)); if (app.charts) app.charts.updateASI(m.frame, m.ASI); }
@@ -477,6 +537,14 @@ function handleMetrics(m) {
         const ce = document.getElementById("confidence-value"), cb = document.getElementById("confidence-fill");
         if (ce) ce.textContent = Math.round(m.confidence * 100) + "%";
         if (cb) cb.style.width = Math.round(m.confidence * 100) + "%";
+    }
+
+    // Server calibration feedback
+    if (m.calibration) {
+        const dist = m.calibration.distance_m;
+        const conf = m.calibration.confidence;
+        const sb = document.getElementById("sb-server");
+        if (sb) sb.textContent = `${dist.toFixed(1)}m`;
     }
 
     // Voice Alert Handling
@@ -641,6 +709,9 @@ app.stopRehab = function() {
 };
 
 function handleRehabMetrics(m) {
+    // Hanya proses rehab metrics saat sedang di view physiolens
+    if (app.currentView !== "physiolens") return;
+
     const count = m.rep_count || 0;
     const formScore = m.form_score || 0;
     const target = m.target_reps || 10;
@@ -757,6 +828,7 @@ function spawnConfetti() {
 // ═══ Stop ══════════════════════════════════════════════════
 app.stopAssessment = function() {
     app.isRecording = false;
+    if (app.calibrator) { app.calibrator.reset(); app.calibrator = null; }
     if (app.mediaStream) { app.mediaStream.getTracks().forEach(t => t.stop()); app.mediaStream = null; }
     if (app.pose) { try { app.pose.close(); } catch(e) {} app.pose = null; }
     if (app.skeleton) app.skeleton.clear();

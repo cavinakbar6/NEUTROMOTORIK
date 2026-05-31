@@ -1,12 +1,6 @@
 /**
- * ChartManager — Grafik live ASI Time Series + PSD (Power Spectral Density).
- * Menggunakan Chart.js dengan animasi minimal untuk real-time performance.
- *
- * Perbaikan:
- *   1. updatePSD() sekarang dipanggil dari handleMetrics()
- *   2. PSD chart terisi dengan data dari server
- *   3. Better axis scaling
- *   4. Tremor zone highlighting pada PSD chart
+ * ChartManager — Live ASI Time Series + PSD charts with dark clinical theme.
+ * Uses Chart.js with minimal animation for real-time performance.
  */
 
 class ChartManager {
@@ -31,8 +25,8 @@ class ChartManager {
                     {
                         label: "ASI",
                         data: [],
-                        borderColor: "#10b981",
-                        backgroundColor: "rgba(16, 185, 129, 0.08)",
+                        borderColor: "#0d9488",
+                        backgroundColor: "rgba(13, 148, 136, 0.08)",
                         fill: true,
                         tension: 0.4,
                         pointRadius: 0,
@@ -41,15 +35,15 @@ class ChartManager {
                     {
                         label: "Normal (0.08)",
                         data: [],
-                        borderColor: "rgba(34,197,94,0.5)",
+                        borderColor: "rgba(34, 197, 94, 0.5)",
                         borderDash: [4, 4],
                         pointRadius: 0,
                         borderWidth: 1,
                     },
                     {
-                        label: "Referal (0.15)",
+                        label: "Referral (0.15)",
                         data: [],
-                        borderColor: "rgba(239,68,68,0.5)",
+                        borderColor: "rgba(220, 38, 38, 0.5)",
                         borderDash: [4, 4],
                         pointRadius: 0,
                         borderWidth: 1,
@@ -73,19 +67,18 @@ class ChartManager {
                     {
                         label: "Power",
                         data: [],
-                        borderColor: "#8b5cf6",
-                        backgroundColor: "rgba(139,92,246,0.1)",
+                        borderColor: "#7c3aed",
+                        backgroundColor: "rgba(124, 58, 237, 0.06)",
                         fill: true,
                         tension: 0.3,
                         pointRadius: 0,
                         borderWidth: 2,
                     },
                     {
-                        // Parkinsonian tremor zone highlight (3.5-7 Hz)
                         label: "Zona Parkinson",
                         data: [],
-                        borderColor: "rgba(239,68,68,0.3)",
-                        backgroundColor: "rgba(239,68,68,0.05)",
+                        borderColor: "rgba(220, 38, 38, 0.25)",
+                        backgroundColor: "rgba(220, 38, 38, 0.03)",
                         fill: true,
                         tension: 0,
                         pointRadius: 0,
@@ -100,20 +93,20 @@ class ChartManager {
                 scales: {
                     y: {
                         beginAtZero: true,
-                        ticks: { color: "#5a6577", font: { size: 10 } },
-                        grid: { color: "rgba(16,185,129,0.1)" },
-                        title: { display: true, text: "Power", color: "#5a6577", font: { size: 10 } },
+                        ticks: { color: "#64748b", font: { size: 10 } },
+                        grid: { color: "rgba(148, 163, 184, 0.15)" },
+                        title: { display: true, text: "Power", color: "#64748b", font: { size: 10 } },
                     },
                     x: {
-                        ticks: { color: "#5a6577", font: { size: 10 }, maxTicksLimit: 10 },
-                        grid: { color: "rgba(16,185,129,0.1)" },
-                        title: { display: true, text: "Frequency (Hz)", color: "#5a6577", font: { size: 10 } },
+                        ticks: { color: "#64748b", font: { size: 10 }, maxTicksLimit: 10 },
+                        grid: { color: "rgba(148, 163, 184, 0.15)" },
+                        title: { display: true, text: "Frequency (Hz)", color: "#64748b", font: { size: 10 } },
                     },
                 },
                 plugins: {
                     legend: {
                         position: "bottom",
-                        labels: { color: "#5a6577", boxWidth: 8, padding: 8, font: { size: 10 } },
+                        labels: { color: "#64748b", boxWidth: 8, padding: 8, font: { size: 10 } },
                     },
                 },
             },
@@ -129,21 +122,21 @@ class ChartManager {
                 y: {
                     min: yMin,
                     max: yMax,
-                    ticks: { color: "#5a6577", font: { size: 10 } },
-                    grid: { color: "rgba(16,185,129,0.1)" },
-                    title: { display: true, text: yLabel, color: "#5a6577", font: { size: 10 } },
+                    ticks: { color: "#64748b", font: { size: 10 } },
+                        grid: { color: "rgba(148, 163, 184, 0.15)" },
+                        title: { display: true, text: yLabel, color: "#64748b", font: { size: 10 } },
                 },
-                x: {
+                    x: {
                     display: false,
-                    grid: { color: "rgba(16,185,129,0.1)" },
+                    grid: { color: "rgba(148, 163, 184, 0.15)" },
                 },
             },
-            plugins: {
-                legend: {
-                    position: "bottom",
-                    labels: { color: "#5a6577", boxWidth: 8, padding: 8, font: { size: 10 } },
+                plugins: {
+                    legend: {
+                        position: "bottom",
+                        labels: { color: "#64748b", boxWidth: 8, padding: 8, font: { size: 10 } },
+                    },
                 },
-            },
         };
     }
 
@@ -157,7 +150,6 @@ class ChartManager {
         if (!this.asiChart) return;
         this.asiChart.data.labels = [...this.frameLabels];
         this.asiChart.data.datasets[0].data = [...this.asiData];
-        // Updated threshold lines to match clinical_thresholds.py
         this.asiChart.data.datasets[1].data = this.frameLabels.map(() => 0.08);
         this.asiChart.data.datasets[2].data = this.frameLabels.map(() => 0.15);
         this.asiChart.update("none");
@@ -168,7 +160,6 @@ class ChartManager {
 
         const labels = freqs.map(f => typeof f === "number" ? f.toFixed(1) : f);
 
-        // Generate Parkinson zone overlay (3.5–7.0 Hz)
         const maxPower = Math.max(...power, 0.001);
         const parkZone = freqs.map(f => {
             return (f >= 3.5 && f <= 7.0) ? maxPower * 0.3 : 0;
